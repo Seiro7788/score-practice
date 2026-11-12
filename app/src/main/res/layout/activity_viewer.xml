@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="#FFFFFF">
+    <LinearLayout android:id="@+id/bar" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:orientation="horizontal"
+        android:background="#EEEEF5" android:gravity="center_vertical" android:padding="4dp">
+        <TextView android:id="@+id/title" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:textSize="14sp" android:maxLines="1"
+            android:ellipsize="end" android:paddingStart="8dp" />
+        <TextView android:id="@+id/pageNo" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:paddingEnd="8dp" />
+        <Button android:id="@+id/btnRange" style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="범위" />
+        <Button android:id="@+id/btnLayer" style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="레이어" />
+        <Button android:id="@+id/btnMenu" style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="⋯" />
+    </LinearLayout>
+    <HorizontalScrollView android:id="@+id/penBar" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:background="#FFF4D6" android:visibility="gone">
+    <LinearLayout android:layout_width="wrap_content"
+        android:layout_height="wrap_content" android:orientation="horizontal"
+        android:gravity="center_vertical" android:padding="4dp">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="필기 중 " android:paddingStart="8dp" />
+        <Button android:id="@+id/penBlack" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="검정" />
+        <Button android:id="@+id/penRed" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="빨강" />
+        <Button android:id="@+id/penBlue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="파랑" />
+        <Button android:id="@+id/penHi" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="형광" />
+        <Button android:id="@+id/penErase" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="지우개" />
+        <Button android:id="@+id/penUndo" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="되돌리기" />
+        <Button android:id="@+id/penDone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="완료" />
+    </LinearLayout>
+    </HorizontalScrollView>
+    <androidx.viewpager2.widget.ViewPager2 android:id="@+id/pager"
+        android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+</LinearLayout>
