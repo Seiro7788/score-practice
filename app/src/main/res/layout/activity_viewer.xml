@@ -12,6 +12,8 @@
             android:layout_height="wrap_content" android:paddingEnd="8dp" />
         <Button android:id="@+id/btnRange" style="?attr/materialButtonOutlinedStyle"
             android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="범위" />
+        <Button android:id="@+id/btnMetro" style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="♩" />
         <Button android:id="@+id/btnLayer" style="?attr/materialButtonOutlinedStyle"
             android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="레이어" />
         <Button android:id="@+id/btnMenu" style="?attr/materialButtonOutlinedStyle"
@@ -35,4 +37,30 @@
     </HorizontalScrollView>
     <androidx.viewpager2.widget.ViewPager2 android:id="@+id/pager"
         android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+
+    <LinearLayout android:id="@+id/practiceBar" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:orientation="horizontal"
+        android:background="#EEF6EE" android:gravity="center_vertical" android:padding="6dp"
+        android:visibility="gone">
+        <Button android:id="@+id/rPrev" android:layout_width="48dp" android:layout_height="wrap_content" android:text="◀" />
+        <TextView android:id="@+id/rName" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:gravity="center" android:textSize="16sp" android:maxLines="2" />
+        <Button android:id="@+id/rNext" android:layout_width="48dp" android:layout_height="wrap_content" android:text="▶" />
+        <Button android:id="@+id/rMinus" android:layout_width="64dp" android:layout_height="64dp" android:text="−1" android:textSize="18sp" />
+        <Button android:id="@+id/rPlus" android:layout_width="96dp" android:layout_height="64dp" android:text="+1" android:textSize="24sp" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/metroBar" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:orientation="horizontal"
+        android:background="#EEEEF8" android:gravity="center_vertical" android:padding="6dp"
+        android:visibility="gone">
+        <Button android:id="@+id/mM5" android:layout_width="52dp" android:layout_height="wrap_content" android:text="−5" />
+        <Button android:id="@+id/mM1" android:layout_width="52dp" android:layout_height="wrap_content" android:text="−1" />
+        <TextView android:id="@+id/mBpm" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:gravity="center" android:textSize="22sp" android:textStyle="bold" />
+        <Button android:id="@+id/mP1" android:layout_width="52dp" android:layout_height="wrap_content" android:text="+1" />
+        <Button android:id="@+id/mP5" android:layout_width="52dp" android:layout_height="wrap_content" android:text="+5" />
+        <Button android:id="@+id/mBeats" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4박" />
+        <Button android:id="@+id/mTap" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="탭" />
+        <Button android:id="@+id/mPlay" android:layout_width="64dp" android:layout_height="wrap_content" android:text="▶" />
+    </LinearLayout>
 </LinearLayout>

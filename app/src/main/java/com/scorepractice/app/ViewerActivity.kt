@@ -35,6 +35,15 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     override var penColor = Color.BLACK
     override var penWidth = 0.003f
     override var erasing = false
+    override var selectedRange: String? = null
+    private lateinit var practiceBar: View
+    private lateinit var rName: TextView
+    private lateinit var metroBar: View
+    private lateinit var mBpm: TextView
+    private lateinit var mPlay: Button
+    private lateinit var mBeats: Button
+    private val taps = mutableListOf<Long>()
+    private val metro = Metronome { b -> onBeat(b) }
 
     private lateinit var pdf: PdfRenderer
     private lateinit var fd: ParcelFileDescriptor
@@ -68,6 +77,9 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 pageNo.text = "${position + 1}/${pdf.pageCount}"; data.lastPage = position; save()
+                pages.values.forEach { if (it.page != position) it.resetZoom() }
+                pager.isUserInputEnabled = mode == PageView.Mode.VIEW
+                selectedRange = null; updatePracticeBar()
             }
         })
         pageNo.text = "${pager.currentItem + 1}/${pdf.pageCount}"
@@ -86,6 +98,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             if (last != null) { data.strokes.remove(last); onInkChanged() }
         }
         findViewById<Button>(R.id.penDone).setOnClickListener { switchMode(PageView.Mode.VIEW) }
+        setupPractice(); setupMetronome(id)
     }
 
     /** "오른쪽으로 밀면 다음 쪽" = right-to-left page order */
@@ -97,20 +110,117 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     private fun switchMode(m: PageView.Mode) {
         mode = m
-        pager.isUserInputEnabled = m == PageView.Mode.VIEW
+        pager.isUserInputEnabled = m == PageView.Mode.VIEW && pages[pager.currentItem]?.zoomed != true
         penBar.visibility = if (m == PageView.Mode.PEN) View.VISIBLE else View.GONE
         btnRange.text = if (m == PageView.Mode.RANGE) "범위 끝" else "범위"
         if (m == PageView.Mode.RANGE) toast("연습할 부분을 손가락으로 끌어 네모를 그리세요")
         if (m == PageView.Mode.PEN) { erasing = false; if (!data.showInk) { data.showInk = true; redraw() } }
         if (m == PageView.Mode.VIEW) save()
+        updatePracticeBar()
+    }
+
+    // ---- practice count buttons
+    private fun pageRanges() = data.ranges.filter { it.page == pager.currentItem && data.layer(it.layer)?.visible == true }
+        .sortedWith(compareBy({ it.y0 }, { it.x0 }))
+
+    private fun currentRange(): Range? {
+        val rs = pageRanges()
+        return rs.firstOrNull { it.id == selectedRange } ?: rs.firstOrNull()?.also { selectedRange = it.id }
+    }
+
+    private fun updatePracticeBar() {
+        val r = if (mode == PageView.Mode.PEN) null else currentRange()
+        practiceBar.visibility = if (r == null) View.GONE else View.VISIBLE
+        if (r != null) {
+            val n = pageRanges().size
+            rName.text = (r.name.ifEmpty { "연습 범위" }) + "\n" + "${r.count} / ${r.target}회" +
+                (if (r.count >= r.target) "  ✓" else "") + if (n > 1) "   (${pageRanges().indexOf(r) + 1}/$n)" else ""
+        }
+        redraw()
+    }
+
+    private fun setupPractice() {
+        practiceBar = findViewById(R.id.practiceBar); rName = findViewById(R.id.rName)
+        findViewById<Button>(R.id.rPlus).setOnClickListener {
+            val r = currentRange() ?: return@setOnClickListener
+            r.count++; r.log.add(System.currentTimeMillis()); save(); updatePracticeBar()
+            if (r.count == r.target) toast("목표 ${r.target}회 달성!")
+        }
+        findViewById<Button>(R.id.rMinus).setOnClickListener {
+            val r = currentRange() ?: return@setOnClickListener
+            if (r.count > 0) { r.count--; if (r.log.isNotEmpty()) r.log.removeAt(r.log.size - 1); save(); updatePracticeBar() }
+        }
+        val step = { d: Int ->
+            val rs = pageRanges()
+            if (rs.isNotEmpty()) {
+                val i = rs.indexOfFirst { it.id == selectedRange }.coerceAtLeast(0)
+                selectedRange = rs[(i + d + rs.size) % rs.size].id; updatePracticeBar()
+            }
+        }
+        findViewById<Button>(R.id.rPrev).setOnClickListener { step(-1) }
+        findViewById<Button>(R.id.rNext).setOnClickListener { step(1) }
+        rName.setOnClickListener { currentRange()?.let { onRangeLongPress(it) } }
+    }
+
+    // ---- metronome
+    private fun setupMetronome(id: String) {
+        metroBar = findViewById(R.id.metroBar); mBpm = findViewById(R.id.mBpm)
+        mPlay = findViewById(R.id.mPlay); mBeats = findViewById(R.id.mBeats)
+        metro.bpm = prefs.getInt("bpm_$id", prefs.getInt("bpm", 80)); metro.beats = prefs.getInt("beats_$id", 4)
+        val show = {
+            mBpm.text = "♩ = ${metro.bpm}"; mBeats.text = "${metro.beats}박"
+            prefs.edit().putInt("bpm_$id", metro.bpm).putInt("bpm", metro.bpm).putInt("beats_$id", metro.beats).apply()
+        }
+        val add = { d: Int -> metro.bpm = (metro.bpm + d).coerceIn(20, 300); show() }
+        findViewById<Button>(R.id.mM5).setOnClickListener { add(-5) }
+        findViewById<Button>(R.id.mM1).setOnClickListener { add(-1) }
+        findViewById<Button>(R.id.mP1).setOnClickListener { add(1) }
+        findViewById<Button>(R.id.mP5).setOnClickListener { add(5) }
+        mBeats.setOnClickListener {
+            val opts = intArrayOf(1, 2, 3, 4, 6, 8)
+            AlertDialog.Builder(this).setTitle("한 마디 박 수 (첫 박 강하게)")
+                .setItems(opts.map { if (it == 1) "강박 없음" else "${it}박" }.toTypedArray()) { _, i -> metro.beats = opts[i]; show() }.show()
+        }
+        findViewById<Button>(R.id.mTap).setOnClickListener {
+            val now = System.currentTimeMillis()
+            if (taps.isNotEmpty() && now - taps.last() > 2000) taps.clear()
+            taps.add(now); if (taps.size > 6) taps.removeAt(0)
+            if (taps.size >= 2) { metro.bpm = (60000.0 / ((taps.last() - taps.first()) / (taps.size - 1).toDouble())).toInt().coerceIn(20, 300); show() }
+        }
+        mBpm.setOnClickListener {
+            val e = EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER; setText(metro.bpm.toString()) }
+            AlertDialog.Builder(this).setTitle("빠르기 (BPM)").setView(e).setPositiveButton("확인") { _, _ ->
+                e.text.toString().toIntOrNull()?.let { metro.bpm = it.coerceIn(20, 300); show() } }.show()
+        }
+        mPlay.setOnClickListener {
+            if (metro.isRunning) { metro.stop(); mPlay.text = "▶"; mBpm.setBackgroundColor(Color.TRANSPARENT) }
+            else { metro.start(); mPlay.text = "■" }
+        }
+        findViewById<Button>(R.id.btnMetro).setOnClickListener {
+            metroBar.visibility = if (metroBar.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        show()
+    }
+
+    private fun onBeat(b: Int) {
+        if (!metro.isRunning) return
+        mBpm.setBackgroundColor(if (b == 0) Color.rgb(255, 170, 170) else Color.rgb(200, 215, 255))
+        mBpm.postDelayed({ mBpm.setBackgroundColor(Color.TRANSPARENT) }, 90)
     }
 
     // ---- PageView.Host
-    override fun onDoubleTap(page: Int) { if (mode == PageView.Mode.VIEW) { switchMode(PageView.Mode.PEN); toast("필기 모드 — 다 쓰면 '완료'") } }
+    override fun onDoubleTap(page: Int) {
+        when (mode) {
+            PageView.Mode.VIEW -> { switchMode(PageView.Mode.PEN); toast("필기 모드 — 끝내려면 다시 두 번 두드리기") }
+            PageView.Mode.PEN -> switchMode(PageView.Mode.VIEW)
+            else -> {}
+        }
+    }
 
-    override fun onRangeTap(r: Range) {
-        r.count++; r.log.add(System.currentTimeMillis()); save(); redraw()
-        toast(if (r.count == r.target) "목표 ${r.target}회 달성!" else "${r.name.ifEmpty { "범위" }} ${r.count}/${r.target}")
+    override fun onRangeTap(r: Range) { selectedRange = r.id; updatePracticeBar() }
+
+    override fun onZoomChanged(zoomed: Boolean) {
+        pager.isUserInputEnabled = !zoomed && mode == PageView.Mode.VIEW
     }
 
     override fun onRangeLongPress(r: Range) {
@@ -127,7 +237,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                     }
                     5 -> data.ranges.remove(r)
                 }
-                save(); redraw()
+                save(); updatePracticeBar()
             }.show()
     }
 
@@ -136,7 +246,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         rangeDialog("${page + 1}쪽-$n", prefs.getInt("defaultTarget", 10)) { name, t ->
             data.ranges.add(Range(Store.newId(), data.activeLayer, page, x0, y0, x1, y1, name, t))
             prefs.edit().putInt("defaultTarget", t).apply()
-            save(); redraw()
+            selectedRange = data.ranges.last().id
+            save(); updatePracticeBar()
         }
     }
 
@@ -212,7 +323,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                 2 -> if (data.layers.size > 1) {
                     data.ranges.removeAll { it.layer == l.id }; data.layers.remove(l)
                     if (data.activeLayer == l.id) data.activeLayer = data.layers[0].id
-                    save(); redraw()
+                    save(); updatePracticeBar()
                 } else toast("레이어가 하나뿐이라 지울 수 없습니다")
             }
         }.show()
@@ -280,13 +391,14 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         override fun onBindViewHolder(h: RecyclerView.ViewHolder, pos: Int) {
             val v = h.itemView as PageView
             pages.entries.removeAll { it.value === v }
-            v.page = pos; pages[pos] = v; load(v, pos)
+            v.page = pos; pages[pos] = v; v.resetZoom(); load(v, pos)
+            if (pos == pager.currentItem) updatePracticeBar()
         }
 
         override fun getItemCount() = pdf.pageCount
     }
 
-    override fun onPause() { super.onPause(); save() }
+    override fun onPause() { super.onPause(); save(); if (metro.isRunning) { metro.stop(); mPlay.text = "▶" } }
 
     override fun onDestroy() {
         super.onDestroy()
