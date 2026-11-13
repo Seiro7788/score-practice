@@ -9,6 +9,10 @@
   .from { background: rgba(70,190,100,.18); border: 2px solid rgba(70,190,100,.9); }
   .to { background: rgba(255,125,125,.18); border: 2px solid rgba(255,125,125,.9); }
   #msg { padding: 40px 16px; color: #666; }
+  .ch { position: absolute; pointer-events: none; text-align: center; line-height: 1.05; white-space: nowrap; transform: translateX(-50%); background: rgba(255,255,255,.88); border-radius: 3px; padding: 0 2px; }
+  .ch b { display: block; color: #3f51b5; font-size: 12px; }
+  .ch i { display: block; color: #b0306a; font-style: normal; font-size: 11px; }
+  .hide .ch { display: none; }
 </style></head>
 <body>
 <div id="msg">악보를 그리는 중…</div>
@@ -26,14 +30,14 @@
     boxes = [];
     const ml = osmd.GraphicSheet.MeasureList;
     for (let i = 0; i < ml.length; i++) {
-      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, top = 1e9;
       for (const gm of ml[i] || []) {
         if (!gm) continue;
         const ps = gm.PositionAndShape, a = ps.AbsolutePosition;
         x0 = Math.min(x0, a.x + ps.BorderLeft); x1 = Math.max(x1, a.x + ps.BorderRight);
-        y0 = Math.min(y0, a.y + ps.BorderTop); y1 = Math.max(y1, a.y + ps.BorderBottom);
+        y0 = Math.min(y0, a.y + ps.BorderTop); y1 = Math.max(y1, a.y + ps.BorderBottom); top = Math.min(top, a.y);
       }
-      boxes.push({ i, x0, y0, x1, y1 });
+      boxes.push({ i, x0, y0, x1, y1, top });
     }
   }
 
@@ -56,6 +60,28 @@
     }
   }
 
+  // chord names + Roman numerals above the measures: [{m, beat (quarters), name, roman}]
+  function drawChords(list) {
+    document.querySelectorAll('.ch').forEach(e => e.remove());
+    const host = document.getElementById('osmd'), s = svgEl().getBoundingClientRect(), h = host.getBoundingClientRect(), u = unit();
+    const ml = osmd.GraphicSheet.MeasureList;
+    for (const c of list) {
+      const b = boxes[c.m]; if (!b) continue;
+      let x = b.x0 + 1.5;
+      const gm = (ml[c.m] || []).find(g => g && g.staffEntries && g.staffEntries.length);
+      if (gm) {
+        const e = gm.staffEntries.find(se => se.relInMeasureTimestamp.RealValue * 4 >= c.beat - 0.01);
+        if (e) x = e.PositionAndShape.AbsolutePosition.x;
+      }
+      const d = document.createElement('div'); d.className = 'ch';
+      d.innerHTML = '<b></b><i></i>'; d.firstChild.textContent = c.name; d.lastChild.textContent = c.roman;
+      d.style.left = (s.left - h.left + x * u) + 'px';
+      d.style.top = (s.top - h.top + b.top * u - 36) + 'px';   // just above the top staff line
+      host.appendChild(d);
+    }
+  }
+  function toggleChords(on) { document.getElementById('osmd').classList.toggle('hide', !on); }
+
   function measureAt(cx, cy) {
     const s = svgEl().getBoundingClientRect(), u = unit();
     const ux = (cx - s.left) / u, uy = (cy - s.top) / u;
@@ -73,6 +99,7 @@
     try {
       osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay('osmd', { autoResize: false, backend: 'svg', drawTitle: true, drawPartNames: false });
       await osmd.load(xml);
+      osmd.EngravingRules.MinimumDistanceBetweenSystems = 9;   // room for chord labels
       osmd.zoom = zoom || 0.6;
       osmd.render();
       collect();
@@ -81,7 +108,10 @@
         const i = measureAt(e.clientX, e.clientY);
         if (i >= 0 && window.Android) Android.onMeasure(i);
       });
-      if (window.Android) Android.onReady(boxes.length);
+      if (window.Android) {
+        try { drawChords(JSON.parse(Android.chords())); toggleChords(Android.showChords()); } catch (e) {}
+        Android.onReady(boxes.length);
+      }
     } catch (err) {
       document.getElementById('msg').textContent = '악보를 그리지 못했습니다: ' + err;
       if (window.Android) Android.onError('' + err);

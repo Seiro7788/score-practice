@@ -11,7 +11,8 @@ class XNote(val measure: Int, val onset: Double, var dur: Double, val midi: Int,
 
 /** one measure (index in file order) */
 class XMeasure(val number: String, var length: Double = 0.0, var forward: Boolean = false, var backward: Boolean = false,
-               var times: Int = 2, val endings: MutableSet<Int> = mutableSetOf(), var fifths: Int = 0)
+               var times: Int = 2, val endings: MutableSet<Int> = mutableSetOf(), var fifths: Int = 0,
+               var minor: Boolean = false, var beats: Int = 4, var beatType: Int = 4)
 
 class XScore(val measures: List<XMeasure>, val notes: List<XNote>, val tempo: Int = 0) {   // tempo = first ♩= in the file
     /** play order of measure indices with repeats and 1st/2nd endings unfolded */
@@ -63,7 +64,7 @@ object MusicXml {
     private val STEP_PC = mapOf('C' to 0, 'D' to 2, 'E' to 4, 'F' to 5, 'G' to 7, 'A' to 9, 'B' to 11)
 
     fun parse(inp: InputStream): XScore {
-        pendingEnding = emptySet(); firstTempo = 0
+        pendingEnding = emptySet(); firstTempo = 0; minorMode = false; tBeats = 4; tType = 4
         val p = Xml.newPullParser(); p.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
         p.setInput(inp, null)
         val measures = mutableListOf<XMeasure>(); val notes = mutableListOf<XNote>()
@@ -82,7 +83,8 @@ object MusicXml {
                         "part" -> { part++; mi = -1; divisions = 1.0; openTies.clear() }
                         "measure" -> {
                             mi++; pos = 0.0; maxPos = 0.0; lastStart = 0.0
-                            if (part == 0) measures.add(XMeasure(p.getAttributeValue(null, "number") ?: "${mi + 1}", fifths = fifths))
+                            if (part == 0) measures.add(XMeasure(p.getAttributeValue(null, "number") ?: "${mi + 1}", fifths = fifths,
+                                minor = minorMode, beats = tBeats, beatType = tType))
                         }
                         "note" -> { inNote = true; isChord = false; isRest = false; isGrace = false; alter = 0; dur = 0.0; staff = 1; tieStop = false; tieStart = false }
                         "chord" -> if (inNote) isChord = true
@@ -110,6 +112,9 @@ object MusicXml {
                     when (p.name) {
                         "divisions" -> t.toDoubleOrNull()?.let { if (it > 0) divisions = it }
                         "fifths" -> t.toIntOrNull()?.let { fifths = it; if (part == 0 && mi >= 0) measures[mi].fifths = it }
+                        "mode" -> { minorMode = t == "minor"; if (part == 0 && mi >= 0) measures[mi].minor = minorMode }
+                        "beats" -> t.toIntOrNull()?.let { tBeats = it; if (part == 0 && mi >= 0) measures[mi].beats = it }
+                        "beat-type" -> t.toIntOrNull()?.let { tType = it; if (part == 0 && mi >= 0) measures[mi].beatType = it }
                         "step" -> if (inNote && t.isNotEmpty()) step = t[0]
                         "alter" -> if (inNote) alter = t.toDoubleOrNull()?.toInt() ?: 0
                         "octave" -> if (inNote) octave = t.toIntOrNull() ?: 4
@@ -163,4 +168,5 @@ object MusicXml {
 
     private var pendingEnding: Set<Int> = emptySet()
     private var firstTempo = 0
+    private var minorMode = false; private var tBeats = 4; private var tType = 4
 }

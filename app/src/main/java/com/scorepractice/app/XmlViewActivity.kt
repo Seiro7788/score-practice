@@ -67,6 +67,10 @@ class XmlViewActivity : AppCompatActivity() {
         fun small(t: String, on: (Button) -> Unit) = Button(this).apply { text = t; isAllCaps = false; minWidth = 0; minimumWidth = 0; setOnClickListener { on(this) } }
         bar.addView(small(hands[data.playHands]) { b -> data.playHands = (data.playHands + 1) % 3; b.text = hands[data.playHands]; saveData(); stop() })
         bar.addView(small(sounds[data.playSound]) { b -> data.playSound = (data.playSound + 1) % 3; b.text = sounds[data.playSound]; saveData(); stop() })
+        bar.addView(CheckBox(this).apply {
+            text = "코드"; isChecked = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("xmlChords", true)
+            setOnCheckedChangeListener { _, v -> getSharedPreferences("settings", MODE_PRIVATE).edit().putBoolean("xmlChords", v).apply(); js("toggleChords($v)") }
+        })
         bar.addView(CheckBox(this).apply { text = "반복"; setOnCheckedChangeListener { _, v -> loop = v; players.forEach { it.isLooping = v } } })
         root.addView(bar)
         // tempo row: −5 −1 [♩= typed number] +1 +5 [악보 빠르기]
@@ -111,6 +115,14 @@ class XmlViewActivity : AppCompatActivity() {
         @JavascriptInterface fun onReady(n: Int) { main.post { status.text = "${n}마디 · 시작할 마디를 누르세요" } }
         @JavascriptInterface fun onError(msg: String) { main.post { status.text = "악보를 그리지 못했습니다: $msg" } }
         @JavascriptInterface fun onMeasure(i: Int) { main.post { tapped(i) } }
+        @JavascriptInterface fun showChords(): Boolean = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("xmlChords", true)
+        @JavascriptInterface fun chords(): String {
+            val a = org.json.JSONArray()
+            try {
+                for (l in Harmony.analyse(sc)) a.put(org.json.JSONObject().put("m", l.measure).put("beat", l.beat).put("name", l.name).put("roman", l.roman))
+            } catch (e: Exception) {}
+            return a.toString()
+        }
     }
 
     private fun label(i: Int) = sc.measures.getOrNull(i)?.number ?: "${i + 1}"
