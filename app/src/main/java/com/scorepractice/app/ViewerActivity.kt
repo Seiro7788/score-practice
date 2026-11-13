@@ -97,7 +97,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         btnRange.setOnClickListener { switchMode(if (mode == PageView.Mode.RANGE) PageView.Mode.VIEW else PageView.Mode.RANGE) }
         findViewById<Button>(R.id.btnLayer).setOnClickListener { layerDialog() }
         findViewById<Button>(R.id.btnMenu).setOnClickListener { menuDialog() }
-        findViewById<Button>(R.id.btnFull).setOnClickListener { if (mode != PageView.Mode.VIEW) switchMode(PageView.Mode.VIEW); setImmersive(true) }
+        findViewById<Button>(R.id.btnFull).setOnClickListener { if (mode != PageView.Mode.VIEW) switchMode(PageView.Mode.VIEW); hideMenus(true) }
         val penSw = findViewById<LinearLayout>(R.id.penSwatches)
         val pens = listOf(Color.BLACK to 0.003f, Color.rgb(220, 30, 30) to 0.003f, Color.rgb(30, 80, 220) to 0.003f,
             Color.argb(110, 255, 220, 0) to 0.014f)
@@ -308,7 +308,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private var immersive = false
     private var metroWasOpen = false
 
-    private fun setImmersive(on: Boolean) {
+    private fun hideMenus(on: Boolean) {
         immersive = on
         val vis = if (on) View.GONE else View.VISIBLE
         findViewById<View>(R.id.bar).visibility = vis
@@ -324,7 +324,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     }
 
     override fun onDoubleTap(page: Int) {
-        if (immersive && mode == PageView.Mode.VIEW) { setImmersive(false); return }
+        if (immersive && mode == PageView.Mode.VIEW) { hideMenus(false); return }
         when (mode) {
             PageView.Mode.VIEW -> { switchMode(PageView.Mode.PEN); toast("필기 모드 — 끝내려면 다시 두 번 두드리기") }
             PageView.Mode.PEN -> switchMode(PageView.Mode.VIEW)
