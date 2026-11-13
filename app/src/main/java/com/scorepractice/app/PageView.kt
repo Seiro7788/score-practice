@@ -19,7 +19,7 @@ import kotlin.math.hypot
 
 /**
  * one score page: the PDF bitmap + practice ranges (per layer) + handwriting.
- * two fingers: pinch to zoom / move (any mode). one finger when zoomed in (VIEW): move the page.
+ * two fingers: pinch to zoom / move (any mode). one finger swipe always turns the page.
  * VIEW: tap a range = select it (count with the +1 button), long-press = edit, double-tap = start writing.
  * RANGE: drag a box = new range.  PEN: draw; double-tap = finish writing.
  * FIX: tap a notehead = cover it with the chosen colour (tap a patch again = remove it).
@@ -359,11 +359,6 @@ class PageView(context: Context, private val host: Host) : View(context) {
             }
             Mode.FIX -> {
                 if (am == MotionEvent.ACTION_DOWN) { downT = e.eventTime; downX = e.x; downY = e.y }
-                if (zoomed && am == MotionEvent.ACTION_MOVE) {
-                    parent?.requestDisallowInterceptTouchEvent(true)
-                    tx += e.x - lastX; ty += e.y - lastY; clamp(); invalidate()
-                }
-                lastX = e.x; lastY = e.y
                 if (am == MotionEvent.ACTION_UP && hypot(e.x - downX, e.y - downY) < 20f) {
                     val o = origs[page]
                     if (o != null) {
@@ -393,11 +388,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
                 invalidate(); return true
             }
             Mode.VIEW -> {
-                if (zoomed) {  // one finger moves the zoomed page
-                    parent?.requestDisallowInterceptTouchEvent(true)
-                    if (am == MotionEvent.ACTION_MOVE) { tx += e.x - lastX; ty += e.y - lastY; clamp(); invalidate() }
-                    lastX = e.x; lastY = e.y
-                }
+                // one finger always turns pages (even zoomed in); moving a zoomed page = two fingers only
                 return gd.onTouchEvent(e)
             }
         }

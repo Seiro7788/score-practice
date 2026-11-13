@@ -124,7 +124,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     private fun switchMode(m: PageView.Mode) {
         mode = m
-        pager.isUserInputEnabled = m == PageView.Mode.VIEW && pages[pager.currentItem]?.zoomed != true
+        pager.isUserInputEnabled = m == PageView.Mode.VIEW
         penBar.visibility = if (m == PageView.Mode.PEN) View.VISIBLE else View.GONE
         fixBar.visibility = if (m == PageView.Mode.FIX) View.VISIBLE else View.GONE
         fingerBar.visibility = if (m == PageView.Mode.FINGER) View.VISIBLE else View.GONE
@@ -335,7 +335,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     override fun onRangeTap(r: Range) { selectedRange = r.id; updatePracticeBar() }
 
     override fun onZoomChanged(zoomed: Boolean) {
-        pager.isUserInputEnabled = !zoomed && mode == PageView.Mode.VIEW
+        pager.isUserInputEnabled = mode == PageView.Mode.VIEW   // zoomed in: still swipe to turn
     }
 
     override fun onRangeLongPress(r: Range) {
