@@ -19,6 +19,9 @@
         <Button android:id="@+id/btnFix" style="?attr/materialButtonOutlinedStyle"
             android:minWidth="0dp" android:minHeight="0dp" android:paddingStart="9dp" android:paddingEnd="9dp" android:textSize="13sp"
             android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="색" />
+        <Button android:id="@+id/btnPlay" style="?attr/materialButtonOutlinedStyle"
+            android:minWidth="0dp" android:minHeight="0dp" android:paddingStart="9dp" android:paddingEnd="9dp" android:textSize="13sp"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="♪" />
         <Button android:id="@+id/btnMetro" style="?attr/materialButtonOutlinedStyle"
             android:minWidth="0dp" android:minHeight="0dp" android:paddingStart="9dp" android:paddingEnd="9dp" android:textSize="13sp"
             android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="♩" />
@@ -94,6 +97,9 @@
         <Button android:id="@+id/rMinus" android:layout_width="64dp" android:layout_height="64dp" android:text="−1" android:textSize="18sp" />
         <Button android:id="@+id/rPlus" android:layout_width="96dp" android:layout_height="64dp" android:text="+1" android:textSize="24sp" />
     </LinearLayout>
+    <LinearLayout android:id="@+id/playBar" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:orientation="vertical"
+        android:background="#F3EEF8" android:padding="4dp" android:visibility="gone" />
     <LinearLayout android:id="@+id/metroBar" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:orientation="vertical"
         android:background="#EEEEF8" android:padding="4dp" android:visibility="gone">

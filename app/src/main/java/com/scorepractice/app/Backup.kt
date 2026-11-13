@@ -30,7 +30,7 @@ object Backup {
     private fun localFiles(c: Context): List<Pair<String, File>> {
         val out = mutableListOf<Pair<String, File>>()
         val lib = Store.libraryFile(c); if (lib.exists()) out.add("library.json" to lib)
-        Store.scoreDir(c).listFiles()?.filter { it.name.endsWith(".pdf") || it.name.endsWith(".json") }
+        Store.scoreDir(c).listFiles()?.filter { it.name.endsWith(".pdf") || it.name.endsWith(".json") || it.name.endsWith(".musicxml") }
             ?.forEach { out.add("scores/${it.name}" to it) }
         return out
     }
@@ -68,6 +68,7 @@ object Backup {
             val pdf = open(s.file) ?: continue
             pdf.use { inp -> File(Store.scoreDir(c), s.file).outputStream().use { inp.copyTo(it) } }
             open("${s.id}.json")?.use { inp -> File(Store.scoreDir(c), "${s.id}.json").outputStream().use { inp.copyTo(it) } }
+            open("${s.id}.musicxml")?.use { inp -> File(Store.scoreDir(c), "${s.id}.musicxml").outputStream().use { inp.copyTo(it) } }
             mine.removeAll { it.id == s.id }; mine.add(s); n++
         }
         Store.saveLibrary(c, mine)
@@ -99,7 +100,7 @@ object Backup {
                 val isPdf = short.endsWith(".pdf")
                 val existing = sd.findFile(short)
                 if (isPdf && existing != null && existing.length() == f.length()) continue
-                val d = existing ?: sd.createFile(if (isPdf) "application/pdf" else "application/json", short) ?: continue
+                val d = existing ?: sd.createFile(if (isPdf) "application/pdf" else if (short.endsWith(".json")) "application/json" else "application/octet-stream", short) ?: continue
                 c.contentResolver.openOutputStream(d.uri, "wt")?.use { o -> f.inputStream().use { it.copyTo(o) } }
             }
             sd.listFiles().forEach { if (it.name != null && it.name !in keep) it.delete() }  // scores deleted on the phone

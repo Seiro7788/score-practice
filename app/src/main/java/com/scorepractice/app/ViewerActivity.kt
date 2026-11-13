@@ -166,7 +166,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         findViewById<Button>(R.id.redo).setOnClickListener { redo() }
         lastJson = snapshot()
         findViewById<Button>(R.id.penDone).setOnClickListener { switchMode(PageView.Mode.VIEW) }
-        setupPractice(); setupMetronome(id); setupFix(id); setupFinger()
+        setupPractice(); setupMetronome(id); setupFix(id); setupFinger(); setupPlay()
     }
 
     /** "오른쪽으로 밀면 다음 쪽" = right-to-left page order */
@@ -350,6 +350,102 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     override fun onFingerExit() { switchMode(PageView.Mode.VIEW); toast("손번호 입력 끝") }
 
     private fun refreshFixes() { pages.values.forEach { it.refreshFixes() } }
+
+    // ---- playing the MusicXML: piano, note names sung (도레미), or both
+    private lateinit var playBar: LinearLayout
+    private var xscore: XScore? = null
+    private val players = mutableListOf<android.media.MediaPlayer>()
+    private val pickXml = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) attachXml(uri) }
+    private fun xmlFile() = File(Store.scoreDir(this), "${score.id}.musicxml")
+
+    private fun attachXml(uri: android.net.Uri) {
+        try {
+            contentResolver.openInputStream(uri)!!.use { inp -> xmlFile().outputStream().use { inp.copyTo(it) } }
+            xscore = MusicXml.load(xmlFile())
+            toast("악보 파일 연결: ${xscore!!.measures.size}마디, 음표 ${xscore!!.notes.size}개")
+            Thread { Backup.sync(applicationContext) }.start()
+        } catch (e: Exception) { xmlFile().delete(); xscore = null; toast("이 파일을 읽지 못했습니다: ${e.message}") }
+        buildPlayBar()
+    }
+
+    private fun setupPlay() {
+        playBar = findViewById(R.id.playBar)
+        findViewById<Button>(R.id.btnPlay).setOnClickListener {
+            playBar.visibility = if (playBar.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            if (playBar.visibility == View.VISIBLE) buildPlayBar()
+        }
+    }
+
+    private fun buildPlayBar() {
+        playBar.removeAllViews()
+        if (xscore == null && xmlFile().exists()) xscore = try { MusicXml.load(xmlFile()) } catch (e: Exception) { null }
+        val sc = xscore
+        val row1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+        val small = { b: Button -> b.isAllCaps = false; b.minWidth = 0; b.minimumWidth = 0; b }
+        row1.addView(small(Button(this).apply {
+            text = if (sc == null) "악보 파일(XML) 연결" else "XML 바꾸기"
+            setOnClickListener { pickXml.launch(arrayOf("*/*")) }
+        }))
+        if (sc == null) {
+            row1.addView(TextView(this).apply { text = "  MusicXML(.musicxml / .xml / .mxl)을 고르세요"; textSize = 12f })
+            playBar.addView(row1); return
+        }
+        val hands = arrayOf("오른손", "왼손", "양손"); val sounds = arrayOf("피아노", "계이름", "계이름+피아노")
+        row1.addView(small(Button(this).apply {
+            text = hands[data.playHands]
+            setOnClickListener { data.playHands = (data.playHands + 1) % 3; text = hands[data.playHands]; Store.saveData(this@ViewerActivity, score.id, data) }
+        }))
+        row1.addView(small(Button(this).apply {
+            text = sounds[data.playSound]
+            setOnClickListener { data.playSound = (data.playSound + 1) % 3; text = sounds[data.playSound]; Store.saveData(this@ViewerActivity, score.id, data) }
+        }))
+        row1.addView(TextView(this).apply { text = "  ♩=${metro.bpm}"; textSize = 13f })
+        val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+        row2.addView(TextView(this).apply { text = " 마디 "; textSize = 13f })
+        val from = EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER; hint = "처음"; textSize = 14f; minEms = 2 }
+        val to = EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER; hint = "끝"; textSize = 14f; minEms = 2 }
+        row2.addView(from); row2.addView(TextView(this).apply { text = "~" }); row2.addView(to)
+        val loop = CheckBox(this).apply { text = "반복" }
+        row2.addView(loop)
+        val play = small(Button(this).apply { text = if (players.isNotEmpty()) "■ 멈춤" else "▶ 재생"; textSize = 16f })
+        play.setOnClickListener {
+            if (players.isNotEmpty()) { stopPlay(); play.text = "▶ 재생"; return@setOnClickListener }
+            val ch = PlayChoice(data.playHands, from.text.toString().toIntOrNull() ?: 0, to.text.toString().toIntOrNull() ?: 0, loop.isChecked)
+            play.text = "준비 중…"; play.isEnabled = false
+            val sound = data.playSound; val bpm = metro.bpm
+            Thread {
+                val err = try {
+                    val tl = Timeline.build(sc, ch, bpm)
+                    if (tl.isEmpty()) "재생할 음표가 없습니다" else {
+                        val files = mutableListOf<File>()
+                        if (sound != 1) { val f = File(cacheDir, "play.mid"); MidiPlayer.write(tl, f); files.add(f) }
+                        if (sound != 0) {
+                            val f = File(cacheDir, "sing.wav")
+                            if (Singer.render(this, Timeline.melody(tl), f)) files.add(f)
+                        }
+                        main.post {
+                            stopPlay()
+                            for (f in files) players.add(MidiPlayer.player(this, f, ch.loop).apply {
+                                setOnCompletionListener { if (!ch.loop) { stopPlay(); play.text = "▶ 재생" } }
+                            })
+                            players.forEach { it.start() }
+                        }
+                        null
+                    }
+                } catch (e: Exception) { e.message ?: e.toString() }
+                main.post { play.isEnabled = true; play.text = if (err == null) "■ 멈춤" else "▶ 재생"; if (err != null) toast(err) }
+            }.start()
+        }
+        row2.addView(play)
+        playBar.addView(row1); playBar.addView(row2)
+        if (data.playSound != 0) playBar.addView(TextView(this).apply {
+            text = "  계이름: 도=C 고정, 휴대폰의 한국어 음성으로 부릅니다 (첫 재생은 준비에 몇 초 걸림)"; textSize = 11f; alpha = 0.7f })
+    }
+
+    private fun stopPlay() {
+        for (p in players) try { p.stop(); p.release() } catch (_: Exception) {}
+        players.clear()
+    }
 
     private fun onBeat(b: Int) {
         if (!metro.isRunning) return
@@ -720,7 +816,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         override fun getItemCount() = screens()
     }
 
-    override fun onPause() { super.onPause(); save(); Thread { Backup.sync(applicationContext) }.start(); if (metro.isRunning) { metro.stop(); mPlay.text = "▶ 시작" } }
+    override fun onPause() { super.onPause(); stopPlay(); save(); Thread { Backup.sync(applicationContext) }.start(); if (metro.isRunning) { metro.stop(); mPlay.text = "▶ 시작" } }
 
     override fun onDestroy() {
         super.onDestroy()

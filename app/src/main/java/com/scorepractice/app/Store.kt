@@ -57,6 +57,7 @@ class ScoreData {
     var lastPage = 0
     var keySig = 99        // key signature for automatic colouring (+ sharps / - flats, 99 = not chosen)
     var lowerTreble = false
+    var playHands = 2; var playSound = 0   // last choices in the play bar
     var fingerScale = 1f  // size of fingering numbers for this score
     var bpm = 0      // metronome tempo used for this score (0 = never set)
     var beats = 0
@@ -149,6 +150,7 @@ object Store {
             d.showInk = o.optBoolean("showInk", true)
             d.lastPage = o.optInt("lastPage", 0)
             d.fingerScale = o.optDouble("fingerScale", 1.0).toFloat()
+            d.playHands = o.optInt("playHands", 2); d.playSound = o.optInt("playSound", 0)
             d.keySig = o.optInt("keySig", 99); d.lowerTreble = o.optBoolean("lowerTreble")
             d.bpm = o.optInt("bpm", 0); d.beats = o.optInt("beats", 0)
         }
@@ -195,12 +197,12 @@ object Store {
         })
         o.put("showFingers", d.showFingers)
         o.put("activeLayer", d.activeLayer).put("showInk", d.showInk).put("lastPage", d.lastPage)
-        o.put("bpm", d.bpm).put("beats", d.beats).put("fingerScale", d.fingerScale.toDouble()).put("keySig", d.keySig).put("lowerTreble", d.lowerTreble)
+        o.put("bpm", d.bpm).put("beats", d.beats).put("fingerScale", d.fingerScale.toDouble()).put("playHands", d.playHands).put("playSound", d.playSound).put("keySig", d.keySig).put("lowerTreble", d.lowerTreble)
         return o
     }
 
     fun deleteScore(c: Context, s: Score) {
-        File(scoreDir(c), s.file).delete(); dataFile(c, s.id).delete()
+        File(scoreDir(c), s.file).delete(); dataFile(c, s.id).delete(); File(scoreDir(c), "${s.id}.musicxml").delete()
     }
 
     private fun writeSafe(f: File, text: String) {
