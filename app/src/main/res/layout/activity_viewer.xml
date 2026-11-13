@@ -63,21 +63,26 @@
         <Button android:id="@+id/rPlus" android:layout_width="96dp" android:layout_height="64dp" android:text="+1" android:textSize="24sp" />
     </LinearLayout>
     <LinearLayout android:id="@+id/metroBar" android:layout_width="match_parent"
-        android:layout_height="wrap_content" android:orientation="horizontal"
-        android:background="#EEEEF8" android:gravity="center_vertical" android:padding="6dp"
-        android:visibility="gone">
-        <Button android:id="@+id/mM5" android:layout_width="52dp" android:layout_height="wrap_content" android:text="−5" />
-        <Button android:id="@+id/mM1" android:layout_width="52dp" android:layout_height="wrap_content" android:text="−1" />
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="♩=" android:textSize="20sp" android:paddingStart="4dp" />
-        <EditText android:id="@+id/mBpm" android:layout_width="0dp" android:layout_weight="1"
-            android:layout_height="wrap_content" android:gravity="center" android:textSize="22sp"
-            android:textStyle="bold" android:inputType="number" android:maxLength="3"
-            android:imeOptions="actionDone" android:selectAllOnFocus="true" />
-        <Button android:id="@+id/mP1" android:layout_width="52dp" android:layout_height="wrap_content" android:text="+1" />
-        <Button android:id="@+id/mP5" android:layout_width="52dp" android:layout_height="wrap_content" android:text="+5" />
-        <Button android:id="@+id/mBeats" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="박없음" />
-        <Button android:id="@+id/mTap" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="탭" />
-        <Button android:id="@+id/mPlay" android:layout_width="64dp" android:layout_height="wrap_content" android:text="▶" />
+        android:layout_height="wrap_content" android:orientation="vertical"
+        android:background="#EEEEF8" android:padding="4dp" android:visibility="gone">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical">
+            <Button android:id="@+id/mM5" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="−5" />
+            <Button android:id="@+id/mM1" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="−1" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="♩=" android:textSize="20sp" android:paddingStart="4dp" />
+            <EditText android:id="@+id/mBpm" android:layout_width="0dp" android:layout_weight="1.4"
+                android:layout_height="wrap_content" android:gravity="center" android:textSize="22sp"
+                android:textStyle="bold" android:inputType="number" android:maxLength="3"
+                android:imeOptions="actionDone" android:selectAllOnFocus="true" />
+            <Button android:id="@+id/mP1" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="+1" />
+            <Button android:id="@+id/mP5" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="+5" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical">
+            <Button android:id="@+id/mBeats" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="박없음" />
+            <Button android:id="@+id/mTap" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="탭" />
+            <Button android:id="@+id/mPlay" android:layout_width="0dp" android:layout_weight="1.6" android:layout_height="wrap_content" android:text="▶ 시작" android:textSize="18sp" />
+        </LinearLayout>
     </LinearLayout>
 </LinearLayout>

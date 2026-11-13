@@ -10,10 +10,10 @@ import kotlin.math.exp
 import kotlin.math.sin
 
 /** sample-accurate metronome: clicks are written into one continuous audio stream. */
-class Metronome(private val onBeat: (Int) -> Unit) {
+class Metronome(private val onBeat: (Int) -> Unit, private val onError: (String) -> Unit = {}) {
     private val rate = 44100
-    @Volatile var bpm = 80
-    @Volatile var beats = 4
+    @Volatile var bpm = 100
+    @Volatile var beats = 1
     @Volatile private var running = false
     private var thread: Thread? = null
     private val main = Handler(Looper.getMainLooper())
@@ -30,20 +30,21 @@ class Metronome(private val onBeat: (Int) -> Unit) {
         if (running) return
         running = true
         thread = Thread {
+          try {
             val minBuf = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
             val track = AudioTrack.Builder()
                 .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
                 .setAudioFormat(AudioFormat.Builder().setSampleRate(rate)
                     .setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-                .setBufferSizeInBytes(minBuf).setTransferMode(AudioTrack.MODE_STREAM).build()
+                .setBufferSizeInBytes(maxOf(minBuf, rate / 5)).setTransferMode(AudioTrack.MODE_STREAM).build()
             val hi = click(1600.0, rate / 20, 0.9); val lo = click(1000.0, rate / 20, 0.6)
             track.play()
             var beat = 0
             while (running) {
                 val n = (rate * 60.0 / bpm.coerceIn(20, 300)).toInt()
                 val buf = ShortArray(n)
-                val c = if (beat == 0) hi else lo
+                val c = if (beat == 0 && beats > 1) hi else lo  // 박없음: every click the same
                 System.arraycopy(c, 0, buf, 0, minOf(c.size, n))
                 val b = beat; main.post { onBeat(b) }
                 var off = 0
@@ -51,6 +52,9 @@ class Metronome(private val onBeat: (Int) -> Unit) {
                 beat = (beat + 1) % beats.coerceAtLeast(1)
             }
             track.stop(); track.release()
+          } catch (e: Exception) {
+            running = false; main.post { onError(e.message ?: e.toString()) }
+          }
         }.apply { priority = Thread.MAX_PRIORITY; start() }
     }
 

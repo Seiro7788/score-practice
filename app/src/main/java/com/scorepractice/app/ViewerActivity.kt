@@ -46,7 +46,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private lateinit var fixBar: View
     private var fixColor = Color.BLACK
     private val fixUndo = mutableListOf<Pair<Boolean, Fix>>()   // (added?, fix)
-    private val metro = Metronome { b -> onBeat(b) }
+    private val metro = Metronome({ b -> onBeat(b) }, { msg -> toast("메트로놈 소리를 낼 수 없습니다: $msg"); mPlay.text = "▶ 시작" })
 
     private lateinit var pdf: PdfRenderer
     private lateinit var fd: ParcelFileDescriptor
@@ -171,11 +171,11 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private fun setupMetronome(id: String) {
         metroBar = findViewById(R.id.metroBar); mBpm = findViewById(R.id.mBpm)
         mPlay = findViewById(R.id.mPlay); mBeats = findViewById(R.id.mBeats)
-        metro.bpm = prefs.getInt("bpm_$id", 100); metro.beats = prefs.getInt("beats_$id", 1)
+        metro.bpm = prefs.getInt("tempo_$id", 100); metro.beats = prefs.getInt("meter_$id", 1)
         val show = {
             if (mBpm.text.toString() != metro.bpm.toString()) mBpm.setText(metro.bpm.toString())
             mBeats.text = if (metro.beats == 1) "박없음" else "${metro.beats}박"
-            prefs.edit().putInt("bpm_$id", metro.bpm).putInt("bpm", metro.bpm).putInt("beats_$id", metro.beats).apply()
+            prefs.edit().putInt("tempo_$id", metro.bpm).putInt("meter_$id", metro.beats).apply()
         }
         val add = { d: Int -> metro.bpm = (metro.bpm + d).coerceIn(20, 300); show() }
         findViewById<Button>(R.id.mM5).setOnClickListener { add(-5) }
@@ -204,8 +204,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         mBpm.setOnEditorActionListener { _, _, _ -> applyTyped(); true }
         mBpm.setOnFocusChangeListener { _, has -> if (!has) { mBpm.text.toString().toIntOrNull()?.let { metro.bpm = it.coerceIn(20, 300) }; show() } }
         mPlay.setOnClickListener {
-            if (metro.isRunning) { metro.stop(); mPlay.text = "▶"; mBpm.setBackgroundColor(Color.TRANSPARENT) }
-            else { mBpm.text.toString().toIntOrNull()?.let { metro.bpm = it.coerceIn(20, 300) }; show(); metro.start(); mPlay.text = "■" }
+            if (metro.isRunning) { metro.stop(); mPlay.text = "▶ 시작"; mBpm.setBackgroundColor(Color.TRANSPARENT) }
+            else { mBpm.text.toString().toIntOrNull()?.let { metro.bpm = it.coerceIn(20, 300) }; show(); metro.start(); mPlay.text = "■ 멈춤" }
         }
         findViewById<Button>(R.id.btnMetro).setOnClickListener {
             metroBar.visibility = if (metroBar.visibility == View.VISIBLE) View.GONE else View.VISIBLE
@@ -463,7 +463,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         override fun getItemCount() = pdf.pageCount
     }
 
-    override fun onPause() { super.onPause(); save(); if (metro.isRunning) { metro.stop(); mPlay.text = "▶" } }
+    override fun onPause() { super.onPause(); save(); if (metro.isRunning) { metro.stop(); mPlay.text = "▶ 시작" } }
 
     override fun onDestroy() {
         super.onDestroy()
