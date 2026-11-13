@@ -44,6 +44,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private lateinit var mBeats: Button
     private val taps = mutableListOf<Long>()
     private lateinit var fixBar: View
+    private lateinit var fingerBar: View
+    private val fingerUndo = mutableListOf<Pair<Boolean, Finger>>()
     private var fixColor = Color.BLACK
     private val fixUndo = mutableListOf<Pair<Boolean, Fix>>()   // (added?, fix)
     private val metro = Metronome({ b -> onBeat(b) }, { msg -> toast("메트로놈 소리를 낼 수 없습니다: $msg"); mPlay.text = "▶ 시작" })
@@ -101,7 +103,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             if (last != null) { data.strokes.remove(last); onInkChanged() }
         }
         findViewById<Button>(R.id.penDone).setOnClickListener { switchMode(PageView.Mode.VIEW) }
-        setupPractice(); setupMetronome(id); setupFix(id)
+        setupPractice(); setupMetronome(id); setupFix(id); setupFinger()
     }
 
     /** "오른쪽으로 밀면 다음 쪽" = right-to-left page order */
@@ -116,6 +118,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         pager.isUserInputEnabled = m == PageView.Mode.VIEW && pages[pager.currentItem]?.zoomed != true
         penBar.visibility = if (m == PageView.Mode.PEN) View.VISIBLE else View.GONE
         fixBar.visibility = if (m == PageView.Mode.FIX) View.VISIBLE else View.GONE
+        fingerBar.visibility = if (m == PageView.Mode.FINGER) View.VISIBLE else View.GONE
         if (m == PageView.Mode.FIX && !data.showFixes) { data.showFixes = true; redraw() }
         btnRange.text = if (m == PageView.Mode.RANGE) "범위 끝" else "범위"
         if (m == PageView.Mode.RANGE) toast("연습할 부분을 손가락으로 끌어 네모를 그리세요")
@@ -134,7 +137,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     }
 
     private fun updatePracticeBar() {
-        val r = if (mode == PageView.Mode.PEN || mode == PageView.Mode.FIX) null else currentRange()
+        val r = if (mode == PageView.Mode.PEN || mode == PageView.Mode.FIX || mode == PageView.Mode.FINGER) null else currentRange()
         practiceBar.visibility = if (r == null) View.GONE else View.VISIBLE
         if (r != null) {
             val n = pageRanges().size
@@ -263,6 +266,25 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         data.fixes.add(f); fixUndo.add(true to f); save(); refreshFixes()
     }
 
+    // ---- fingering numbers
+    private fun setupFinger() {
+        fingerBar = findViewById(R.id.fingerBar)
+        findViewById<Button>(R.id.btnFinger).setOnClickListener {
+            switchMode(if (mode == PageView.Mode.FINGER) PageView.Mode.VIEW else PageView.Mode.FINGER)
+            if (mode == PageView.Mode.FINGER && !data.showFingers) { data.showFingers = true; save() }
+        }
+        findViewById<Button>(R.id.fingerUndo).setOnClickListener {
+            val u = fingerUndo.removeLastOrNull() ?: return@setOnClickListener
+            if (u.first) data.fingers.remove(u.second) else data.fingers.add(u.second)
+            save(); redraw()
+        }
+    }
+
+    override fun onFingerAdd(f: Finger) { data.fingers.add(f); fingerUndo.add(true to f); save(); redraw() }
+    override fun onFingerRemove(f: Finger) { data.fingers.remove(f); fingerUndo.add(false to f); save(); redraw() }
+    override fun onFingerMoved(f: Finger) { save(); redraw() }
+    override fun onFingerExit() { switchMode(PageView.Mode.VIEW); toast("손번호 입력 끝") }
+
     private fun refreshFixes() { pages.values.forEach { it.refreshFixes() } }
 
     private fun onBeat(b: Int) {
@@ -354,6 +376,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         box.addView(ink)
         box.addView(CheckBox(this).apply { text = "색 고친 것 보이기"; isChecked = data.showFixes
             setOnCheckedChangeListener { _, v -> data.showFixes = v; save(); refreshFixes() } })
+        box.addView(CheckBox(this).apply { text = "손번호 보이기"; isChecked = data.showFingers
+            setOnCheckedChangeListener { _, v -> data.showFingers = v; save(); redraw() } })
         box.addView(TextView(this).apply { text = "레이어 이름을 길게 누르면 이름 바꾸기·삭제"; alpha = 0.6f })
         val dlg = AlertDialog.Builder(this).setTitle("레이어").setView(box)
             .setPositiveButton("닫기", null)

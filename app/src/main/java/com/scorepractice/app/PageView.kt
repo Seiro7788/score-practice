@@ -12,6 +12,9 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.math.hypot
 
 /**
@@ -36,9 +39,13 @@ class PageView(context: Context, private val host: Host) : View(context) {
         fun onInkChanged()
         fun onZoomChanged(zoomed: Boolean)
         fun onFixTap(page: Int, x: Float, y: Float, head: HeadFix.Head?, w: Int, h: Int)
+        fun onFingerAdd(f: Finger)
+        fun onFingerRemove(f: Finger)
+        fun onFingerMoved(f: Finger)
+        fun onFingerExit()
     }
 
-    enum class Mode { VIEW, RANGE, PEN, FIX }
+    enum class Mode { VIEW, RANGE, PEN, FIX, FINGER }
 
     var page = -1
     /** the page as rendered from the PDF; [bitmap] is that page with colour fixes applied */
@@ -80,6 +87,43 @@ class PageView(context: Context, private val host: Host) : View(context) {
     // pen-mode double tap
     private var downT = 0L; private var downX = 0f; private var downY = 0f; private var lastTapT = 0L
     private var pendingDot: Runnable? = null
+    // fingering: press where the number goes, then swipe. angle (counter-clockwise from right):
+    // 1 = 0°, 2 ≈ 34°, 3 ≈ 68°, 4 ≈ 101°, 5 = 135°  (±15°);  left (180° ±15°) = leave fingering mode
+    private var fStart: Pair<Float, Float>? = null
+    private var fNow: Pair<Float, Float>? = null
+    private var fHit: Finger? = null
+    private var fDragging = false
+    private val fingerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; isFakeBoldText = true; color = Color.rgb(20, 30, 120) }
+    private val fingerHalo = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER; isFakeBoldText = true; color = Color.WHITE; style = Paint.Style.STROKE
+    }
+    private val guide = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; isFakeBoldText = true }
+    private val guideBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(200, 255, 255, 255) }
+
+    companion object {
+        val FINGER_ANGLES = floatArrayOf(0f, 33.75f, 67.5f, 101.25f, 135f)
+        const val TOL = 15f
+        /** 1..5, 0 = leave mode, -1 = nothing */
+        fun choice(dx: Float, dy: Float): Int {
+            var a = Math.toDegrees(atan2(-dy.toDouble(), dx.toDouble())).toFloat()
+            if (a < -90f) a += 360f
+            if (abs(a - 180f) <= TOL) return 0
+            FINGER_ANGLES.forEachIndexed { i, t -> if (abs(a - t) <= TOL) return i + 1 }
+            return -1
+        }
+    }
+
+    private fun staffSpaceNorm(): Float {
+        val o = orig ?: return 0.0085f
+        if (sp == 0f) sp = HeadFix.staffSpace(o)
+        return sp / o.width
+    }
+
+    private fun fingerAt(x: Float, y: Float): Finger? {
+        val r = 1.3f * staffSpaceNorm()
+        return host.data.fingers.filter { it.page == page && abs(it.x - x) < r && abs((it.y - y) * dst.height() / dst.width()) < r * 1.2f }
+            .minByOrNull { abs(it.x - x) + abs(it.y - y) }
+    }
 
     private val scaler = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(d: ScaleGestureDetector): Boolean {
@@ -146,6 +190,12 @@ class PageView(context: Context, private val host: Host) : View(context) {
             c.drawRect(rr.left, rr.top - 40f / z, rr.left + tw + 16f / z, rr.top, labelBg)
             label.color = col; c.drawText(t, rr.left + 8f / z, rr.top - 9f / z, label)
         }
+        if (host.data.showFingers || host.mode == Mode.FINGER) for (g in host.data.fingers) if (g.page == page) {
+            val ts = g.s * dst.width() * 1.7f
+            fingerPaint.textSize = ts; fingerHalo.textSize = ts; fingerHalo.strokeWidth = ts * 0.18f
+            val yb = sy(g.y) + ts * 0.36f
+            c.drawText(g.n.toString(), sx(g.x), yb, fingerHalo); c.drawText(g.n.toString(), sx(g.x), yb, fingerPaint)
+        }
         if (host.data.showInk) for (s in host.data.strokes) if (s.page == page) drawStroke(c, s.pts, s.color, s.width)
         if (cur.size >= 2) drawStroke(c, cur.toFloatArray(), host.penColor, host.penWidth)
         val a = dragStart; val e = dragNow
@@ -154,6 +204,26 @@ class PageView(context: Context, private val host: Host) : View(context) {
             c.drawRect(sx(minOf(a.first, e.first)), sy(minOf(a.second, e.second)), sx(maxOf(a.first, e.first)), sy(maxOf(a.second, e.second)), edge)
         }
         c.restore()
+        drawFingerGuide(c)
+    }
+
+    /** fan of the five numbers around the pressed point while swiping */
+    private fun drawFingerGuide(c: Canvas) {
+        val s = fStart ?: return; val n = fNow ?: return
+        if (fDragging || host.mode != Mode.FINGER) return
+        val sel = if (hypot(n.first - s.first, n.second - s.second) > 30f) choice(n.first - s.first, n.second - s.second) else -1
+        val R = 110f
+        c.drawCircle(s.first, s.second, R + 45f, guideBg)
+        for (i in 0..4) {
+            val a = Math.toRadians(FINGER_ANGLES[i].toDouble())
+            val gx = s.first + (R * cos(a)).toFloat(); val gy = s.second - (R * sin(a)).toFloat()
+            guide.textSize = if (sel == i + 1) 64f else 40f
+            guide.color = if (sel == i + 1) Color.rgb(200, 30, 30) else Color.rgb(60, 60, 60)
+            c.drawText((i + 1).toString(), gx, gy + guide.textSize * 0.35f, guide)
+        }
+        guide.textSize = if (sel == 0) 40f else 30f; guide.color = if (sel == 0) Color.rgb(200, 30, 30) else Color.GRAY
+        c.drawText("완료", s.first - R, s.second + 12f, guide)
+        guide.color = Color.rgb(200, 30, 30); c.drawCircle(s.first, s.second, 6f, guide)
     }
 
     private fun drawStroke(c: Canvas, pts: FloatArray, color: Int, w: Float) {
@@ -171,7 +241,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
         if (am == MotionEvent.ACTION_DOWN) { multi = false; lastX = e.x; lastY = e.y }
         if (am == MotionEvent.ACTION_POINTER_DOWN) {
             multi = true; parent?.requestDisallowInterceptTouchEvent(true)
-            cur.clear(); dragStart = null; dragNow = null; invalidate()
+            cur.clear(); dragStart = null; dragNow = null; fStart = null; fNow = null; fDragging = false; invalidate()
         }
         if (multi || e.pointerCount > 1) {
             // two-finger move while pinching
@@ -186,6 +256,36 @@ class PageView(context: Context, private val host: Host) : View(context) {
         }
         when (host.mode) {
             Mode.PEN -> return penTouch(e)
+            Mode.FINGER -> {
+                when (am) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downT = e.eventTime; fStart = e.x to e.y; fNow = fStart; fDragging = false
+                        fHit = fingerAt(nx(e.x), ny(e.y))
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        fNow = e.x to e.y
+                        val h = fHit
+                        if (h != null && !fDragging && e.eventTime - downT > 350) fDragging = true
+                        if (fDragging && h != null) { h.x = nx(e.x); h.y = ny(e.y) }
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val s = fStart; val h = fHit
+                        if (fDragging && h != null) host.onFingerMoved(h)
+                        else if (s != null) {
+                            val dx = e.x - s.first; val dy = e.y - s.second
+                            if (hypot(dx, dy) < 30f) { if (h != null) host.onFingerRemove(h) }
+                            else when (val k = choice(dx, dy)) {
+                                0 -> host.onFingerExit()
+                                in 1..5 -> host.onFingerAdd(Finger(page, nx(s.first), ny(s.second), k, staffSpaceNorm()))
+                                else -> {}
+                            }
+                        }
+                        fStart = null; fNow = null; fHit = null; fDragging = false
+                    }
+                    MotionEvent.ACTION_CANCEL -> { fStart = null; fNow = null; fHit = null; fDragging = false }
+                }
+                invalidate(); return true
+            }
             Mode.FIX -> {
                 if (am == MotionEvent.ACTION_DOWN) { downT = e.eventTime; downX = e.x; downY = e.y }
                 if (zoomed && am == MotionEvent.ACTION_MOVE) {

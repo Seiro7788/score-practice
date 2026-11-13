@@ -10,15 +10,23 @@
             android:ellipsize="end" android:paddingStart="8dp" />
         <TextView android:id="@+id/pageNo" android:layout_width="wrap_content"
             android:layout_height="wrap_content" android:paddingEnd="8dp" />
+        <Button android:id="@+id/btnFinger" style="?attr/materialButtonOutlinedStyle"
+            android:minWidth="0dp" android:minHeight="0dp" android:paddingStart="9dp" android:paddingEnd="9dp" android:textSize="13sp"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="손" />
         <Button android:id="@+id/btnRange" style="?attr/materialButtonOutlinedStyle"
+            android:minWidth="0dp" android:minHeight="0dp" android:paddingStart="9dp" android:paddingEnd="9dp" android:textSize="13sp"
             android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="범위" />
         <Button android:id="@+id/btnFix" style="?attr/materialButtonOutlinedStyle"
+            android:minWidth="0dp" android:minHeight="0dp" android:paddingStart="9dp" android:paddingEnd="9dp" android:textSize="13sp"
             android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="색" />
         <Button android:id="@+id/btnMetro" style="?attr/materialButtonOutlinedStyle"
+            android:minWidth="0dp" android:minHeight="0dp" android:paddingStart="9dp" android:paddingEnd="9dp" android:textSize="13sp"
             android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="♩" />
         <Button android:id="@+id/btnLayer" style="?attr/materialButtonOutlinedStyle"
+            android:minWidth="0dp" android:minHeight="0dp" android:paddingStart="9dp" android:paddingEnd="9dp" android:textSize="13sp"
             android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="레이어" />
         <Button android:id="@+id/btnMenu" style="?attr/materialButtonOutlinedStyle"
+            android:minWidth="0dp" android:minHeight="0dp" android:paddingStart="9dp" android:paddingEnd="9dp" android:textSize="13sp"
             android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="⋯" />
     </LinearLayout>
     <HorizontalScrollView android:id="@+id/penBar" android:layout_width="match_parent"
@@ -48,6 +56,15 @@
         <Button android:id="@+id/fixDone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="완료" />
     </LinearLayout>
     </HorizontalScrollView>
+    <LinearLayout android:id="@+id/fingerBar" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:orientation="horizontal"
+        android:background="#E8F0FF" android:gravity="center_vertical" android:padding="4dp"
+        android:visibility="gone">
+        <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:paddingStart="8dp" android:textSize="13sp"
+            android:text="손번호: 넣을 곳을 누르고 밀기  →1  ↗2  가파르게↗3  ↑4  ↖5   ←완료\n번호 누르기=지우기, 꾹 눌러 끌기=옮기기" />
+        <Button android:id="@+id/fingerUndo" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="되돌리기" />
+    </LinearLayout>
     <androidx.viewpager2.widget.ViewPager2 android:id="@+id/pager"
         android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
 
