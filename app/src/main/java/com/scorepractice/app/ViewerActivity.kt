@@ -90,7 +90,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     /** "오른쪽으로 밀면 다음 쪽" = right-to-left page order */
     private fun applyDirection() {
-        pager.layoutDirection = if (prefs.getBoolean("swipeRightNext", true)) View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
+        pager.layoutDirection = if (prefs.getBoolean("swipeRightNext", false)) View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
     }
 
     private fun pen(c: Int, w: Float) { penColor = c; penWidth = w; erasing = false }
@@ -219,7 +219,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     }
 
     private fun menuDialog() {
-        val dir = if (prefs.getBoolean("swipeRightNext", true)) "지금: 오른쪽으로 밀면 다음 쪽" else "지금: 왼쪽으로 밀면 다음 쪽"
+        val dir = if (prefs.getBoolean("swipeRightNext", false)) "지금: 오른쪽으로 밀면 다음 쪽" else "지금: 왼쪽으로 밀면 다음 쪽"
         AlertDialog.Builder(this).setItems(arrayOf("연습 범위 목록", "쪽 이동", "넘김 방향 바꾸기 ($dir)", "이 쪽 필기 모두 지우기")) { _, w ->
             when (w) {
                 0 -> rangeList()
@@ -227,7 +227,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                     AlertDialog.Builder(this).setTitle("쪽 이동").setView(e).setPositiveButton("이동") { _, _ ->
                         e.text.toString().toIntOrNull()?.let { pager.setCurrentItem((it - 1).coerceIn(0, pdf.pageCount - 1), false) }
                     }.show() }
-                2 -> { prefs.edit().putBoolean("swipeRightNext", !prefs.getBoolean("swipeRightNext", true)).apply(); applyDirection() }
+                2 -> { prefs.edit().putBoolean("swipeRightNext", !prefs.getBoolean("swipeRightNext", false)).apply(); applyDirection() }
                 3 -> { val p = pager.currentItem
                     AlertDialog.Builder(this).setMessage("${p + 1}쪽의 필기를 모두 지울까요?").setPositiveButton("지우기") { _, _ ->
                         data.strokes.removeAll { it.page == p }; onInkChanged() }.setNegativeButton("취소", null).show() }
