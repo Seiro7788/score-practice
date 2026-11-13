@@ -50,6 +50,7 @@ class ScoreData {
     var activeLayer: String = ""
     var showInk = true
     var lastPage = 0
+    var fingerScale = 1f  // size of fingering numbers for this score
     var bpm = 0      // metronome tempo used for this score (0 = never set)
     var beats = 0
 
@@ -135,6 +136,7 @@ object Store {
             d.activeLayer = o.optString("activeLayer")
             d.showInk = o.optBoolean("showInk", true)
             d.lastPage = o.optInt("lastPage", 0)
+            d.fingerScale = o.optDouble("fingerScale", 1.0).toFloat()
             d.bpm = o.optInt("bpm", 0); d.beats = o.optInt("beats", 0)
         }
         if (d.layers.isEmpty()) d.layers.add(Layer(newId(), "연습 1", LAYER_COLORS[0]))
@@ -180,7 +182,7 @@ object Store {
         })
         o.put("showFingers", d.showFingers)
         o.put("activeLayer", d.activeLayer).put("showInk", d.showInk).put("lastPage", d.lastPage)
-        o.put("bpm", d.bpm).put("beats", d.beats)
+        o.put("bpm", d.bpm).put("beats", d.beats).put("fingerScale", d.fingerScale.toDouble())
         return o
     }
 

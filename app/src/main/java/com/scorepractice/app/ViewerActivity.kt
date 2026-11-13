@@ -276,10 +276,17 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     // ---- fingering numbers
     private fun setupFinger() {
         fingerBar = findViewById(R.id.fingerBar)
+        findViewById<Button>(R.id.fingerSmaller).setOnClickListener { fingerSize(0.88f) }
+        findViewById<Button>(R.id.fingerBigger).setOnClickListener { fingerSize(1.14f) }
         findViewById<Button>(R.id.btnFinger).setOnClickListener {
             switchMode(if (mode == PageView.Mode.FINGER) PageView.Mode.VIEW else PageView.Mode.FINGER)
             if (mode == PageView.Mode.FINGER && !data.showFingers) { data.showFingers = true; save() }
         }
+    }
+
+    private fun fingerSize(f: Float) {
+        data.fingerScale = (data.fingerScale * f).coerceIn(0.5f, 2.5f); save(); redraw()
+        toast("손번호 크기 ${(data.fingerScale * 100).toInt()}%")
     }
 
     override fun onFingerAdd(f: Finger) { data.fingers.add(f); save(); redraw() }

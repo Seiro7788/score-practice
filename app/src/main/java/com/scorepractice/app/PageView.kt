@@ -237,7 +237,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
             label.color = col; c.drawText(t, rr.left + 8f / z, rr.top - 9f / z, label)
         }
         if (host.data.showFingers || host.mode == Mode.FINGER) for (g in host.data.fingers) if (g.page == page) {
-            val ts = g.s * dst.width() * 1.7f
+            val ts = g.s * dst.width() * 1.7f * host.data.fingerScale
             fingerPaint.textSize = ts; fingerHalo.textSize = ts; fingerHalo.strokeWidth = ts * 0.18f
             val yb = sy(g.y) + ts * 0.36f
             c.drawText(g.n.toString(), sx(g.x), yb, fingerHalo); c.drawText(g.n.toString(), sx(g.x), yb, fingerPaint)
@@ -279,7 +279,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
         guide.textSize = if (sel == -2) 40f else 30f; guide.color = if (sel == -2) Color.rgb(200, 30, 30) else Color.GRAY
         c.drawText("취소", s0.first + (R * cos(ca)).toFloat(), s0.second - (R * sin(ca)).toFloat() + 12f, guide)
         // the pressed spot: crosshair + preview of the number that will be placed there
-        val ts = staffSpaceNorm() * dst.width() * z * 1.7f
+        val ts = staffSpaceNorm() * dst.width() * z * 1.7f * host.data.fingerScale
         c.drawCircle(s0.first, s0.second, ts * 0.7f, mark)
         c.drawLine(s0.first - ts, s0.second, s0.first - ts * 0.75f, s0.second, mark)
         c.drawLine(s0.first + ts * 0.75f, s0.second, s0.first + ts, s0.second, mark)
