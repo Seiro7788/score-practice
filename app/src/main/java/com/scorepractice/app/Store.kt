@@ -50,6 +50,8 @@ class ScoreData {
     var activeLayer: String = ""
     var showInk = true
     var lastPage = 0
+    var bpm = 0      // metronome tempo used for this score (0 = never set)
+    var beats = 0
 
     fun layer(id: String) = layers.firstOrNull { it.id == id }
 }
@@ -133,6 +135,7 @@ object Store {
             d.activeLayer = o.optString("activeLayer")
             d.showInk = o.optBoolean("showInk", true)
             d.lastPage = o.optInt("lastPage", 0)
+            d.bpm = o.optInt("bpm", 0); d.beats = o.optInt("beats", 0)
         }
         if (d.layers.isEmpty()) d.layers.add(Layer(newId(), "연습 1", LAYER_COLORS[0]))
         if (d.layer(d.activeLayer) == null) d.activeLayer = d.layers[0].id
@@ -177,6 +180,7 @@ object Store {
         })
         o.put("showFingers", d.showFingers)
         o.put("activeLayer", d.activeLayer).put("showInk", d.showInk).put("lastPage", d.lastPage)
+        o.put("bpm", d.bpm).put("beats", d.beats)
         return o
     }
 

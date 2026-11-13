@@ -182,11 +182,17 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private fun setupMetronome(id: String) {
         metroBar = findViewById(R.id.metroBar); mBpm = findViewById(R.id.mBpm)
         mPlay = findViewById(R.id.mPlay); mBeats = findViewById(R.id.mBeats)
-        metro.bpm = prefs.getInt("tempo_$id", 100); metro.beats = prefs.getInt("meter_$id", 1)
+        // this score's own tempo; a score opened for the first time starts from the tempo used most recently
+        metro.bpm = if (data.bpm > 0) data.bpm else prefs.getInt("tempo_$id", prefs.getInt("tempo_last", 100))
+        metro.beats = if (data.beats > 0) data.beats else prefs.getInt("meter_$id", prefs.getInt("meter_last", 1))
         val show = {
             if (mBpm.text.toString() != metro.bpm.toString()) mBpm.setText(metro.bpm.toString())
             mBeats.text = if (metro.beats == 1) "박없음" else "${metro.beats}박"
-            prefs.edit().putInt("tempo_$id", metro.bpm).putInt("meter_$id", metro.beats).apply()
+            prefs.edit().putInt("tempo_last", metro.bpm).putInt("meter_last", metro.beats).apply()
+            if (data.bpm != metro.bpm || data.beats != metro.beats) {
+                data.bpm = metro.bpm; data.beats = metro.beats
+                Store.saveData(this, score.id, data)   // kept with the score (and in backups); not an undo step
+            }
         }
         val add = { d: Int -> metro.bpm = (metro.bpm + d).coerceIn(20, 300); show() }
         findViewById<Button>(R.id.mM5).setOnClickListener { add(-5) }
@@ -484,7 +490,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private val redoStack = ArrayDeque<String>()
 
     /** snapshot without view-only state (page, visibility toggles don't count as edits) */
-    private fun snapshot(): String = Store.toJson(data).apply { remove("lastPage") }.toString()
+    private fun snapshot(): String = Store.toJson(data).apply { remove("lastPage"); remove("bpm"); remove("beats") }.toString()
 
     private fun save() {
         val now = snapshot()
@@ -496,8 +502,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     }
 
     private fun restore(json: String) {
-        val page = data.lastPage
-        data = Store.parse(json); data.lastPage = page; lastJson = json
+        val page = data.lastPage; val bpm = data.bpm; val beats = data.beats
+        data = Store.parse(json); data.lastPage = page; data.bpm = bpm; data.beats = beats; lastJson = json
         Store.saveData(this, score.id, data)
         refreshFixes(); updatePracticeBar(); redraw()
     }
