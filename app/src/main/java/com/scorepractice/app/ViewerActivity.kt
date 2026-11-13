@@ -19,6 +19,7 @@ import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
@@ -59,6 +60,11 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private val main = Handler(Looper.getMainLooper())
     private val pages = mutableMapOf<Int, PageView>()
     private val prefs by lazy { getSharedPreferences("settings", MODE_PRIVATE) }
+    private val exportOpt = PdfExport.Options()
+    // save dialog of the system: phone storage or Google Drive
+    private val createPdf = registerForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        if (uri != null) doExport(uri)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -407,19 +413,49 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     private fun menuDialog() {
         val dir = if (prefs.getBoolean("swipeRightNext", false)) "지금: 오른쪽으로 밀면 다음 쪽" else "지금: 왼쪽으로 밀면 다음 쪽"
-        AlertDialog.Builder(this).setItems(arrayOf("연습 기록", "쪽 이동", "넘김 방향 바꾸기 ($dir)", "이 쪽 필기 모두 지우기")) { _, w ->
+        AlertDialog.Builder(this).setItems(arrayOf("연습 기록", "PDF로 저장", "쪽 이동", "넘김 방향 바꾸기 ($dir)", "이 쪽 필기 모두 지우기")) { _, w ->
             when (w) {
                 0 -> openRecord()
-                1 -> { val e = EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER; hint = "1 ~ ${pdf.pageCount}" }
+                1 -> exportDialog()
+                2 -> { val e = EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER; hint = "1 ~ ${pdf.pageCount}" }
                     AlertDialog.Builder(this).setTitle("쪽 이동").setView(e).setPositiveButton("이동") { _, _ ->
                         e.text.toString().toIntOrNull()?.let { pager.setCurrentItem((it - 1).coerceIn(0, pdf.pageCount - 1), false) }
                     }.show() }
-                2 -> { prefs.edit().putBoolean("swipeRightNext", !prefs.getBoolean("swipeRightNext", false)).apply(); applyDirection() }
-                3 -> { val p = pager.currentItem
+                3 -> { prefs.edit().putBoolean("swipeRightNext", !prefs.getBoolean("swipeRightNext", false)).apply(); applyDirection() }
+                4 -> { val p = pager.currentItem
                     AlertDialog.Builder(this).setMessage("${p + 1}쪽의 필기를 모두 지울까요?").setPositiveButton("지우기") { _, _ ->
                         data.strokes.removeAll { it.page == p }; onInkChanged() }.setNegativeButton("취소", null).show() }
             }
         }.show()
+    }
+
+    private fun exportDialog() {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 16, 48, 0) }
+        val items = listOf(
+            Triple("색 고친 것", exportOpt.fixes) { v: Boolean -> exportOpt.fixes = v },
+            Triple("필기", exportOpt.ink) { v: Boolean -> exportOpt.ink = v },
+            Triple("손번호", exportOpt.fingers) { v: Boolean -> exportOpt.fingers = v },
+            Triple("연습 범위(네모·횟수)", exportOpt.ranges) { v: Boolean -> exportOpt.ranges = v })
+        for ((name, on, set) in items) box.addView(CheckBox(this).apply { text = name; isChecked = on; setOnCheckedChangeListener { _, v -> set(v) } })
+        AlertDialog.Builder(this).setTitle("PDF로 저장 — 넣을 것").setView(box)
+            .setPositiveButton("저장 위치 고르기") { _, _ ->
+                val base = (if (score.composer.isNotEmpty()) score.composer + "_" else "") + score.title
+                createPdf.launch(base.replace(Regex("[\\\\/:*?\"<>|]"), "_") + "_연습본.pdf")
+            }.setNegativeButton("취소", null).show()
+    }
+
+    private fun doExport(uri: android.net.Uri) {
+        val msg = TextView(this).apply { setPadding(60, 40, 60, 40); text = "PDF 만드는 중…" }
+        val dlg = AlertDialog.Builder(this).setView(msg).setCancelable(false).show()
+        val snap = Store.parse(Store.toJson(data).toString())
+        Thread {
+            val err = try {
+                contentResolver.openOutputStream(uri)!!.use { out ->
+                    PdfExport.export(pdf, pdf, snap, exportOpt, out) { i, n -> main.post { msg.text = "PDF 만드는 중… $i / $n 쪽" } }
+                }; null
+            } catch (e: Exception) { e.message ?: e.toString() }
+            main.post { dlg.dismiss(); toast(if (err == null) "PDF로 저장했습니다" else "저장 실패: $err") }
+        }.start()
     }
 
     private fun openRecord() {
