@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- five staff lines -->
+    <path android:strokeColor="#2B2D42" android:strokeWidth="1.7" android:strokeLineCap="round"
+        android:pathData="M27,43H81M27,49.5H81M27,56H81M27,62.5H81M27,69H81"/>
+    <!-- coral note (sharp colour) -->
+    <group android:rotation="-20" android:pivotX="47" android:pivotY="65.75">
+        <path android:fillColor="#E85D75" android:pathData="M41,65.75a6,4.4 0,1 0,12 0a6,4.4 0,1 0,-12 0z"/>
+    </group>
+    <!-- blue note (flat colour) -->
+    <group android:rotation="-20" android:pivotX="65" android:pivotY="52.75">
+        <path android:fillColor="#4C6EF5" android:pathData="M59,52.75a6,4.4 0,1 0,12 0a6,4.4 0,1 0,-12 0z"/>
+    </group>
+    <!-- stems and beam -->
+    <path android:fillColor="#2B2D42" android:pathData="M51.6,36h1.9v29.5h-1.9zM69.6,26h1.9v26h-1.9zM52.5,36L71.5,26L71.5,31L52.5,41z"/>
+</vector>

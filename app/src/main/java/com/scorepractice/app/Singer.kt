@@ -239,8 +239,8 @@ object Singer {
     /** PSOLA: consonant copied, voiced part re-spaced to pitch f and stretched to len samples */
     private fun psola(vo: Voice, f: Double, len: Int, female: Boolean): FloatArray {
         val out = FloatArray(len + 4 * vo.period)
-        val cons = min(vo.v0, len / 3)
-        for (i in 0 until cons) out[i] = vo.pcm[i]
+        val cons = min(min(vo.v0, (0.12 * RATE).toInt()), len / 2)
+        for (i in 0 until cons) out[i] = vo.pcm[vo.v0 - cons + i]
         val T = RATE / f
         val m = vo.marks; val L = vo.period
         val form = if (female) 1.0 else 1.16          // >1: grains read slower = lower formants (male timbre)
@@ -270,6 +270,9 @@ object Singer {
         return res
     }
 
+    /** consonant length of a syllable: it is sung this much before the beat */
+    private fun preRoll(c: Context, step: Char): Int = prepare(c)?.get(step)?.let { min(it.v0, (0.12 * RATE).toInt()) } ?: 0
+
     private fun sing(c: Context, step: Char, f: Double, len: Int, female: Boolean): FloatArray {
         val vo = prepare(c)?.get(step) ?: return synth(step, f, len, female)
         val y = psola(vo, f, len, female)
@@ -292,6 +295,7 @@ object Singer {
     fun render(c: Context, melody: List<TNote>, out: File, composer: String = ""): Boolean {
         if (melody.isEmpty()) return false
         val keepOctave = Regex("바흐|bach|스칼라티|scarlatti", RegexOption.IGNORE_CASE).containsMatchIn(composer)
+        prepare(c)   // make the voice first (TTS); also tells how early each consonant starts
         val total = ((melody.last().t + melody.last().d + 0.4) * RATE).toInt()
         val mixb = FloatArray(total)
         for (ph in phrases(melody)) {
@@ -304,7 +308,8 @@ object Singer {
                 val f = 440.0 * 2.0.pow((n.midi + shift - 69) / 12.0)
                 // legato: hold until the next note of the phrase starts (small overlap for a smooth join)
                 val endT = if (k + 1 < ph.size) ph[k + 1].t + 0.015 else n.t + n.d
-                val len = max(1, ((endT - n.t) * RATE).toInt()); val a = (n.t * RATE).toInt()
+                val pre = preRoll(c, n.step)
+                val len = max(1, ((endT - n.t) * RATE).toInt() + pre); val a = max(0, (n.t * RATE).toInt() - pre)
                 val v = sing(c, n.step, f, len, female)
                 for (i in v.indices) if (a + i < total) mixb[a + i] += v[i]
             }

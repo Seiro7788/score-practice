@@ -81,6 +81,20 @@
     }
   }
   let chordList = [];
+  // semitone colours (same as the coloured PDFs): sharp / double sharp / flat, black key or white key
+  const BLACK = [1, 3, 6, 8, 10];
+  const COL = { s_b: '#FF7D7D', s_w: '#6E23A0', x_b: '#FFB9B9', x_w: '#736973', f_b: '#5087FF', f_w: '#46BE64' };
+  function colorize(on) {
+    for (const sm of osmd.Sheet.SourceMeasures) for (const c of sm.VerticalSourceStaffEntryContainers)
+      for (const se of c.StaffEntries) if (se) for (const ve of se.VoiceEntries) for (const n of ve.Notes) {
+        if (!n.Pitch) continue;
+        const a = n.Pitch.AccidentalHalfTones, black = BLACK.includes(((n.halfTone % 12) + 12) % 12);
+        let col;
+        if (on && a !== 0) col = a >= 2 ? (black ? COL.x_b : COL.x_w) : a === 1 ? (black ? COL.s_b : COL.s_w) : (black ? COL.f_b : COL.f_w);
+        n.NoteheadColor = col;
+      }
+  }
+  function setColors(on) { colorize(on); setZoom(osmd.zoom); }
   // redraw at another size (the score re-flows to the screen width); marks and chords follow
   function setZoom(z) {
     osmd.zoom = z; osmd.render(); collect();
@@ -104,8 +118,9 @@
 
   async function start(xml, zoom) {
     try {
-      osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay('osmd', { autoResize: false, backend: 'svg', drawTitle: true, drawPartNames: false });
+      osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay('osmd', { autoResize: false, backend: 'svg', drawTitle: true, drawPartNames: false, coloringEnabled: true });
       await osmd.load(xml);
+      colorize(window.Android ? Android.showColors() : true);
       osmd.EngravingRules.MinimumDistanceBetweenSystems = 9;   // room for chord labels
       osmd.zoom = zoom || 0.6;
       osmd.render();

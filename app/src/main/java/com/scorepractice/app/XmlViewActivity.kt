@@ -77,6 +77,10 @@ class XmlViewActivity : AppCompatActivity() {
         bar.addView(small(hands[data.playHands]) { b -> data.playHands = (data.playHands + 1) % 3; b.text = hands[data.playHands]; saveData(); stop() })
         bar.addView(small(sounds[data.playSound]) { b -> data.playSound = (data.playSound + 1) % 3; b.text = sounds[data.playSound]; saveData(); stop() })
         bar.addView(CheckBox(this).apply {
+            text = "반음색"; isChecked = prefs.getBoolean("xmlColors", true)
+            setOnCheckedChangeListener { _, v -> prefs.edit().putBoolean("xmlColors", v).apply(); js("setColors($v)") }
+        })
+        bar.addView(CheckBox(this).apply {
             text = "코드"; isChecked = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("xmlChords", true)
             setOnCheckedChangeListener { _, v -> getSharedPreferences("settings", MODE_PRIVATE).edit().putBoolean("xmlChords", v).apply(); js("toggleChords($v)") }
         })
@@ -130,6 +134,7 @@ class XmlViewActivity : AppCompatActivity() {
         @JavascriptInterface fun onReady(n: Int) { main.post { status.text = "${n}마디 · 시작할 마디를 누르세요" } }
         @JavascriptInterface fun onError(msg: String) { main.post { status.text = "악보를 그리지 못했습니다: $msg" } }
         @JavascriptInterface fun onMeasure(i: Int) { main.post { tapped(i) } }
+        @JavascriptInterface fun showColors(): Boolean = prefs.getBoolean("xmlColors", true)
         @JavascriptInterface fun showChords(): Boolean = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("xmlChords", true)
         @JavascriptInterface fun chords(): String {
             val a = org.json.JSONArray()
@@ -171,7 +176,7 @@ class XmlViewActivity : AppCompatActivity() {
                     main.post {
                         stopPlayers()
                         for (f in files) players.add(MidiPlayer.player(this, f, loop).apply { setOnCompletionListener { if (!loop) stop() } })
-                        players.forEach { it.start() }
+                        players.reversed().forEach { it.start() }   // voice first, piano right after
                         status.text = "${label(a)}~${if (b < 0) "끝" else label(b)}마디 재생 중 · 아무 곳이나 누르면 멈춤"
                         follow()
                     }

@@ -432,7 +432,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                             for (f in files) players.add(MidiPlayer.player(this, f, ch.loop).apply {
                                 setOnCompletionListener { if (!ch.loop) { stopPlay(); play.text = "▶ 재생" } }
                             })
-                            players.forEach { it.start() }
+                            players.reversed().forEach { it.start() }   // voice first, piano right after
                         }
                         null
                     }
