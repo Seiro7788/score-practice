@@ -1,7 +1,13 @@
 package com.scorepractice.app
 
 import android.content.Context
+import android.os.Bundle
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import java.io.File
+import java.util.Locale
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.io.RandomAccessFile
 import kotlin.math.PI
 import kotlin.math.abs
@@ -13,9 +19,11 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Sings the melody with note names, made by a small voice synthesizer:
- * every note is generated directly at its exact pitch (no re-tuning of recorded speech),
- * and held smoothly for its whole length (no looping).
+ * Sings the melody with note names in a human voice:
+ * the phone's text-to-speech says each syllable once (Italian voice if installed, otherwise Korean),
+ * then every note is made from it by PSOLA — pitch periods are re-spaced to the exact note pitch
+ * (the voice's own timbre and clear pronunciation stay), and the vowel is stretched smoothly to the note length.
+ * A male voice is made by lowering the formants; without any voice a small synthesizer is used.
  * Syllables in Italian: do re mi fa sol la si (fixed do: C = do), clear machine voice.
  * Rules: soprano lines in a female voice, low lines in a male voice; the voice never changes inside a phrase;
  * notes too high/low to sing move by whole octaves for a whole phrase (not note by note); legato, no gaps.
@@ -59,7 +67,7 @@ object Singer {
     private val rnd = java.util.Random(7)
 
     /** one sung note: consonant, then the vowel held at pitch f for len samples */
-    private fun sing(step: Char, f: Double, len: Int, female: Boolean): FloatArray {
+    private fun synth(step: Char, f: Double, len: Int, female: Boolean): FloatArray {
         val s0 = syllable(step)
         val sy = Syl(s0.c, voiced(s0.v, female), s0.end?.let { voiced(it, female) })
         val out = FloatArray(len)
@@ -114,6 +122,162 @@ object Singer {
         return out
     }
 
+    // ---------- human voice: TTS syllables + PSOLA
+    class Voice(val pcm: FloatArray, val v0: Int, val marks: IntArray, val period: Int)
+    private var voices: Map<Char, Voice>? = null
+    private var triedTts = false
+
+    private val IT = mapOf('C' to "do", 'D' to "re", 'E' to "mi", 'F' to "fa", 'G' to "sol", 'A' to "la", 'B' to "si")
+    private val KO = mapOf('C' to "도", 'D' to "레", 'E' to "미", 'F' to "파", 'G' to "솔", 'A' to "라", 'B' to "씨")
+
+    /** make the seven syllables once (blocks; call off the main thread) */
+    private fun prepare(c: Context): Map<Char, Voice>? {
+        voices?.let { return it }
+        if (triedTts) return null
+        triedTts = true
+        val dir = File(c.cacheDir, "syl2").apply { mkdirs() }
+        val ready = CountDownLatch(1); var status = -1
+        var tts: TextToSpeech? = null
+        tts = TextToSpeech(c.applicationContext) { st -> status = st; ready.countDown() }
+        ready.await(8, TimeUnit.SECONDS)
+        val t = tts ?: return null
+        if (status != TextToSpeech.SUCCESS) { t.shutdown(); return null }
+        val words = when {
+            t.setLanguage(Locale.ITALIAN) >= TextToSpeech.LANG_AVAILABLE -> IT
+            t.setLanguage(Locale.KOREAN) >= TextToSpeech.LANG_AVAILABLE -> KO
+            else -> { t.shutdown(); return null }
+        }
+        val done = CountDownLatch(words.size)
+        t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(id: String?) {}
+            override fun onDone(id: String?) { done.countDown() }
+            @Deprecated("Deprecated in Java") override fun onError(id: String?) { done.countDown() }
+        })
+        t.setSpeechRate(0.85f)
+        for ((k, w) in words) t.synthesizeToFile(w, Bundle(), File(dir, "$k.wav"), "s$k")
+        done.await(25, TimeUnit.SECONDS); t.shutdown()
+        val out = mutableMapOf<Char, Voice>()
+        for (k in words.keys) readWav(File(dir, "$k.wav"))?.let { analyse(it) }?.let { out[k] = it }
+        return if (out.size == words.size) out.also { voices = it } else null
+    }
+
+    private fun readWav(f: File): FloatArray? {
+        if (!f.exists() || f.length() < 100) return null
+        val b = f.readBytes()
+        fun u16(i: Int) = (b[i].toInt() and 0xff) or ((b[i + 1].toInt() and 0xff) shl 8)
+        fun u32(i: Int) = u16(i) or (u16(i + 2) shl 16)
+        var i = 12; var rate = RATE; var ch = 1; var bits = 16
+        while (i + 8 <= b.size) {
+            val id = String(b, i, 4); val len = u32(i + 4)
+            if (id == "fmt ") { ch = u16(i + 10); rate = u32(i + 12); bits = u16(i + 22) }
+            if (id == "data") {
+                if (bits != 16) return null
+                val n = min(len, b.size - i - 8) / (2 * ch)
+                val x = FloatArray(n) { k -> u16(i + 8 + k * 2 * ch).toShort().toFloat() / 32768f }
+                // to our rate
+                if (rate == RATE) return x
+                val r = rate.toDouble() / RATE
+                return FloatArray((n / r).toInt()) { j -> val p = j * r; val k = p.toInt(); if (k + 1 < n) (x[k] + (x[k + 1] - x[k]) * (p - k)).toFloat() else 0f }
+            }
+            i += 8 + len + (len and 1)
+        }
+        return null
+    }
+
+    /** f0 per frame by autocorrelation; the first peak near the best avoids octave errors */
+    private fun f0Track(x: FloatArray, hop: Int, win: Int): DoubleArray {
+        val peak = x.maxOfOrNull { abs(it) } ?: 0f
+        val n = max(0, (x.size - win) / hop)
+        return DoubleArray(n) { fi ->
+            val c = fi * hop
+            var e = 0.0; for (i in 0 until win) e += x[c + i] * x[c + i]
+            if (sqrt(e / win) < 0.02 * peak) return@DoubleArray 0.0
+            val l0 = RATE / 1100; val l1 = RATE / 70
+            val cs = DoubleArray(l1 - l0)
+            for (j in cs.indices) {
+                val lag = l0 + j; var ab = 0.0; var aa = 0.0; var bb = 0.0
+                for (i in 0 until win - lag) { val a = x[c + i]; val b = x[c + i + lag]; ab += a * b; aa += a * a; bb += b * b }
+                cs[j] = ab / sqrt(aa * bb + 1e-9)
+            }
+            val mx = cs.maxOrNull() ?: 0.0
+            if (mx < 0.5) return@DoubleArray 0.0
+            for (j in 1 until cs.size - 1) if (cs[j] >= 0.9 * mx && cs[j] >= cs[j - 1] && cs[j] >= cs[j + 1]) return@DoubleArray RATE.toDouble() / (l0 + j)
+            0.0
+        }
+    }
+
+    /** trim silence, normalise, find the voiced part and one pitch mark per period */
+    private fun analyse(raw: FloatArray): Voice? {
+        val pk = raw.maxOfOrNull { abs(it) } ?: return null
+        if (pk <= 0f) return null
+        val a = raw.indexOfFirst { abs(it) > pk * 0.03f }; val b = raw.indexOfLast { abs(it) > pk * 0.03f }
+        if (a < 0 || b - a < RATE / 20) return null
+        val x = FloatArray(b - a + 1) { raw[a + it] / pk }
+        val hop = 110; val win = 600
+        val fs = f0Track(x, hop, win)
+        val voiced = fs.indices.filter { fs[it] > 0 }
+        if (voiced.size < 3) return null
+        val v0 = voiced.first() * hop + win / 2; val v1 = voiced.last() * hop + win / 2
+        val mean = voiced.map { fs[it] }.average()
+        val marks = mutableListOf<Int>()
+        var T = (RATE / fs[voiced.first()]).toInt()
+        var i = v0 + (0 until min(T, x.size - v0)).maxByOrNull { abs(x[v0 + it]) }!!
+        val sign = if (x[i] >= 0) 1f else -1f
+        while (i < v1 && i < x.size) {
+            marks.add(i)
+            val k = ((i - win / 2) / hop).coerceIn(0, fs.size - 1)
+            T = (RATE / (if (fs[k] > 0) fs[k] else mean)).toInt()
+            val lo = i + (T * 0.8).toInt(); val hi = min(x.size - 1, i + (T * 1.2).toInt())
+            if (hi <= lo) break
+            i = (lo..hi).maxByOrNull { x[it] * sign }!!
+        }
+        if (marks.size < 4) return null
+        val per = marks.zipWithNext { p, q -> q - p }.sorted()[marks.size / 2]
+        return Voice(x, v0, marks.toIntArray(), per)
+    }
+
+    /** PSOLA: consonant copied, voiced part re-spaced to pitch f and stretched to len samples */
+    private fun psola(vo: Voice, f: Double, len: Int, female: Boolean): FloatArray {
+        val out = FloatArray(len + 4 * vo.period)
+        val cons = min(vo.v0, len / 3)
+        for (i in 0 until cons) out[i] = vo.pcm[i]
+        val T = RATE / f
+        val m = vo.marks; val L = vo.period
+        val form = if (female) 1.0 else 1.16          // >1: grains read slower = lower formants (male timbre)
+        val gl = (2 * L * form).toInt()
+        val hann = FloatArray(gl) { (0.5 - 0.5 * kotlin.math.cos(2 * PI * it / (gl - 1))).toFloat() }
+        var t = cons.toDouble()
+        val span = max(1.0, (len - cons).toDouble())
+        while (t < len) {
+            val frac = (t - cons) / span
+            val ti = m.first() + frac * (m.last() - m.first())
+            var k = 0; var bd = Int.MAX_VALUE
+            for (j in m.indices) { val d = abs(m[j] - ti.toInt()); if (d < bd) { bd = d; k = j } }
+            val c = m[k]; val s = t.toInt() - gl / 2
+            for (g in 0 until gl) {
+                val src = c - L + g / form                // read the grain (slower for a male voice)
+                val si = src.toInt(); if (si < 0 || si + 1 >= vo.pcm.size) continue
+                val v = vo.pcm[si] + (vo.pcm[si + 1] - vo.pcm[si]) * (src - si).toFloat()
+                val o = s + g; if (o in 0 until out.size) out[o] += v * hann[g]
+            }
+            t += T
+        }
+        val res = out.copyOf(len)
+        val fade = min(len / 4, (0.04 * RATE).toInt())
+        for (i in 0 until fade) res[len - 1 - i] *= i.toFloat() / fade
+        val att = min(len / 8, 120)
+        for (i in 0 until att) res[i] *= i.toFloat() / att
+        return res
+    }
+
+    private fun sing(c: Context, step: Char, f: Double, len: Int, female: Boolean): FloatArray {
+        val vo = prepare(c)?.get(step) ?: return synth(step, f, len, female)
+        val y = psola(vo, f, len, female)
+        val pk = y.maxOfOrNull { abs(it) } ?: 1f
+        if (pk > 0f) for (i in y.indices) y[i] = y[i] / pk * 0.5f
+        return y
+    }
+
     /** phrases = runs of notes without a rest between them */
     private fun phrases(m: List<TNote>): List<List<TNote>> {
         val out = mutableListOf<MutableList<TNote>>()
@@ -141,7 +305,7 @@ object Singer {
                 // legato: hold until the next note of the phrase starts (small overlap for a smooth join)
                 val endT = if (k + 1 < ph.size) ph[k + 1].t + 0.015 else n.t + n.d
                 val len = max(1, ((endT - n.t) * RATE).toInt()); val a = (n.t * RATE).toInt()
-                val v = sing(n.step, f, len, female)
+                val v = sing(c, n.step, f, len, female)
                 for (i in v.indices) if (a + i < total) mixb[a + i] += v[i]
             }
         }
