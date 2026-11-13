@@ -38,6 +38,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     override val penStraight: Boolean
         get() = straight && Color.alpha(penColor) < 255
     private var straight = true
+    private var penLayerLabel: (() -> Unit)? = null
     private var penSize = 1; private var hiSize = 1
     private val PEN_WIDTHS = floatArrayOf(0.0018f, 0.003f, 0.005f)
     private val HI_WIDTHS = floatArrayOf(0.009f, 0.014f, 0.022f)
@@ -147,6 +148,19 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             text = if (straight) "곧게 ✓" else "곧게"; isAllCaps = false; minWidth = 0; minimumWidth = 0
             setOnClickListener { straight = !straight; prefs.edit().putBoolean("hiStraight", straight).apply(); text = if (straight) "곧게 ✓" else "곧게" }
         })
+        penSw.addView(Button(this).apply {
+            isAllCaps = false; minWidth = 0; minimumWidth = 0
+            val show = { text = "레이어: " + (data.layer(data.activeLayer)?.name ?: "") }
+            show(); penLayerLabel = show
+            setOnClickListener {
+                val names = data.layers.map { it.name }.toTypedArray()
+                AlertDialog.Builder(this@ViewerActivity).setTitle("필기할 레이어").setItems(names) { _, i ->
+                    data.activeLayer = data.layers[i].id
+                    if (!data.layers[i].visible) { data.layers[i].visible = true; redraw() }
+                    save(); show()
+                }.show()
+            }
+        }, 0)
         findViewById<Button>(R.id.penErase).setOnClickListener { erasing = true; toast("지우개: 지울 선을 문지르세요") }
         findViewById<Button>(R.id.undo).setOnClickListener { undo() }
         findViewById<Button>(R.id.redo).setOnClickListener { redo() }
@@ -171,7 +185,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         if (m == PageView.Mode.FIX && !data.showFixes) { data.showFixes = true; redraw() }
         btnRange.text = if (m == PageView.Mode.RANGE) "범위 끝" else "범위"
         if (m == PageView.Mode.RANGE) toast("연습할 부분을 손가락으로 끌어 네모를 그리세요")
-        if (m == PageView.Mode.PEN) { erasing = false; if (!data.showInk) { data.showInk = true; redraw() } }
+        if (m == PageView.Mode.PEN) { penLayerLabel?.invoke(); data.layer(data.activeLayer)?.let { if (!it.visible) { it.visible = true; redraw() } }; erasing = false; if (!data.showInk) { data.showInk = true; redraw() } }
         if (m == PageView.Mode.VIEW) save()
         updatePracticeBar()
     }
@@ -430,12 +444,12 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     private fun layerDialog() {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(40, 16, 40, 0) }
-        box.addView(TextView(this).apply { text = "체크 = 보이기,  ● = 새 범위를 넣을 레이어" })
+        box.addView(TextView(this).apply { text = "체크 = 보이기,  ● = 지금 쓰는 레이어 (새 범위·필기가 들어감)" })
         for (l in data.layers) {
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val cb = CheckBox(this).apply { isChecked = l.visible; setOnCheckedChangeListener { _, v -> l.visible = v; save(); redraw() } }
             val rb = RadioButton(this).apply {
-                text = "${l.name}  (${data.ranges.count { it.layer == l.id }}개)"; setTextColor(l.color); isChecked = l.id == data.activeLayer
+                text = "${l.name}  (범위 ${data.ranges.count { it.layer == l.id }} · 필기 ${data.strokes.count { it.layer == l.id }})"; setTextColor(l.color); isChecked = l.id == data.activeLayer
                 setOnClickListener { data.activeLayer = l.id; save() }
             }
             row.addView(cb); row.addView(rb)
@@ -474,13 +488,13 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     }
 
     private fun layerEdit(l: Layer) {
-        AlertDialog.Builder(this).setTitle(l.name).setItems(arrayOf("이름 바꾸기", "횟수 모두 0으로", "레이어 삭제(범위 포함)")) { _, w ->
+        AlertDialog.Builder(this).setTitle(l.name).setItems(arrayOf("이름 바꾸기", "횟수 모두 0으로", "레이어 삭제(범위·필기 포함)")) { _, w ->
             when (w) {
                 0 -> { val e = EditText(this).apply { setText(l.name) }
                     AlertDialog.Builder(this).setView(e).setPositiveButton("저장") { _, _ -> l.name = e.text.toString(); save() }.show() }
                 1 -> { data.ranges.filter { it.layer == l.id }.forEach { it.count = 0; it.log.clear() }; save(); redraw() }
                 2 -> if (data.layers.size > 1) {
-                    data.ranges.removeAll { it.layer == l.id }; data.layers.remove(l)
+                    data.ranges.removeAll { it.layer == l.id }; data.strokes.removeAll { it.layer == l.id }; data.layers.remove(l)
                     if (data.activeLayer == l.id) data.activeLayer = data.layers[0].id
                     save(); updatePracticeBar()
                 } else toast("레이어가 하나뿐이라 지울 수 없습니다")

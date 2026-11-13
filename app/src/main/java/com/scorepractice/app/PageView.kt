@@ -244,8 +244,8 @@ class PageView(context: Context, private val host: Host) : View(context) {
             c.drawText(g.n.toString(), sx(g.x), yb, fingerHalo); c.drawText(g.n.toString(), sx(g.x), yb, fingerPaint)
         }
         if (host.data.showInk) {
-            for (s in host.data.strokes) if (s.page == page && Color.alpha(s.color) < 255) drawStroke(c, s.pts, s.color, s.width)
-            for (s in host.data.strokes) if (s.page == page && Color.alpha(s.color) == 255) drawStroke(c, s.pts, s.color, s.width)
+            for (s in host.data.strokes) if (s.page == page && Color.alpha(s.color) < 255 && host.data.strokeVisible(s)) drawStroke(c, s.pts, s.color, s.width)
+            for (s in host.data.strokes) if (s.page == page && Color.alpha(s.color) == 255 && host.data.strokeVisible(s)) drawStroke(c, s.pts, s.color, s.width)
         }
         if (i == touchSeg && cur.size >= 2) drawStroke(c,
             if (host.penStraight && cur.size >= 4) floatArrayOf(cur[0], cur[1], cur[cur.size - 2], cur[cur.size - 1]) else cur.toFloatArray(),
@@ -426,11 +426,11 @@ class PageView(context: Context, private val host: Host) : View(context) {
                     lastTapT = e.eventTime
                     val dot = floatArrayOf(cur[0], cur[1])
                     val pg = page
-                    val r = Runnable { host.data.strokes.add(Stroke(pg, host.penColor, host.penWidth, dot)); host.onInkChanged() }
+                    val r = Runnable { host.data.strokes.add(Stroke(pg, host.penColor, host.penWidth, dot, host.data.activeLayer)); host.onInkChanged() }
                     pendingDot = r; postDelayed(r, 350)
                 } else if (cur.size >= 4) {
                     val pts = if (host.penStraight) floatArrayOf(cur[0], cur[1], cur[cur.size - 2], cur[cur.size - 1]) else cur.toFloatArray()
-                    host.data.strokes.add(Stroke(page, host.penColor, host.penWidth, pts)); host.onInkChanged()
+                    host.data.strokes.add(Stroke(page, host.penColor, host.penWidth, pts, host.data.activeLayer)); host.onInkChanged()
                 }
                 cur.clear()
             }
@@ -441,7 +441,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
     private fun erase(x: Float, y: Float) {
         val r = 0.02f / z
         val gone = host.data.strokes.filter { s ->
-            s.page == page && (0 until s.pts.size / 2).any { i ->
+            s.page == page && host.data.strokeVisible(s) && (0 until s.pts.size / 2).any { i ->
                 val dx = s.pts[2 * i] - x; val dy = s.pts[2 * i + 1] - y; abs(dx) < r && abs(dy) < r
             }
         }

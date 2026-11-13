@@ -42,7 +42,7 @@ data class Fix(val page: Int, val x: Float, val y: Float, val r: Float, val colo
 data class Finger(val page: Int, var x: Float, var y: Float, val n: Int, val s: Float)
 
 /** handwriting stroke, normalized coordinates */
-data class Stroke(val page: Int, val color: Int, val width: Float, val pts: FloatArray)
+data class Stroke(val page: Int, val color: Int, val width: Float, val pts: FloatArray, val layer: String = "")   // layer "" = not in a layer
 
 class ScoreData {
     val layers = mutableListOf<Layer>()
@@ -62,6 +62,9 @@ class ScoreData {
     var beats = 0
 
     fun layer(id: String) = layers.firstOrNull { it.id == id }
+
+    /** handwriting shown: ink switched on and its layer visible */
+    fun strokeVisible(s: Stroke) = showInk && (s.layer.isEmpty() || layer(s.layer)?.visible != false)
 }
 
 object Store {
@@ -125,7 +128,7 @@ object Store {
             for (i in 0 until sa.length()) {
                 val s = sa.getJSONObject(i); val p = s.getJSONArray("pts")
                 d.strokes.add(Stroke(s.getInt("page"), s.getInt("color"), s.getDouble("width").toFloat(),
-                    FloatArray(p.length()) { p.getDouble(it).toFloat() }))
+                    FloatArray(p.length()) { p.getDouble(it).toFloat() }, s.optString("layer")))
             }
             val fa = o.optJSONArray("fixes") ?: JSONArray()
             for (i in 0 until fa.length()) {
@@ -174,7 +177,7 @@ object Store {
         o.put("strokes", JSONArray().apply {
             d.strokes.forEach { s ->
                 put(JSONObject().put("page", s.page).put("color", s.color).put("width", s.width.toDouble())
-                    .put("pts", JSONArray().apply { s.pts.forEach { put(it.toDouble()) } }))
+                    .put("pts", JSONArray().apply { s.pts.forEach { put(it.toDouble()) } }).put("layer", s.layer))
             }
         })
         o.put("fixes", JSONArray().apply {
