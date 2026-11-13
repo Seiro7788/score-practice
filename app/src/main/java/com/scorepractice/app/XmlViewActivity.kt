@@ -77,6 +77,10 @@ class XmlViewActivity : AppCompatActivity() {
         bar.addView(small(hands[data.playHands]) { b -> data.playHands = (data.playHands + 1) % 3; b.text = hands[data.playHands]; saveData(); stop() })
         bar.addView(small(sounds[data.playSound]) { b -> data.playSound = (data.playSound + 1) % 3; b.text = sounds[data.playSound]; saveData(); stop() })
         bar.addView(CheckBox(this).apply {
+            text = "셈여림"; isChecked = prefs.getBoolean("xmlDyn", true)
+            setOnCheckedChangeListener { _, v -> prefs.edit().putBoolean("xmlDyn", v).apply(); js("toggleDyn($v)") }
+        })
+        bar.addView(CheckBox(this).apply {
             text = "반음색"; isChecked = prefs.getBoolean("xmlColors", true)
             setOnCheckedChangeListener { _, v -> prefs.edit().putBoolean("xmlColors", v).apply(); js("setColors($v)") }
         })
@@ -134,6 +138,15 @@ class XmlViewActivity : AppCompatActivity() {
         @JavascriptInterface fun onReady(n: Int) { main.post { status.text = "${n}마디 · 시작할 마디를 누르세요" } }
         @JavascriptInterface fun onError(msg: String) { main.post { status.text = "악보를 그리지 못했습니다: $msg" } }
         @JavascriptInterface fun onMeasure(i: Int) { main.post { tapped(i) } }
+        @JavascriptInterface fun showDyn(): Boolean = prefs.getBoolean("xmlDyn", true)
+        @JavascriptInterface fun dynamics(): String {
+            val a = org.json.JSONArray()
+            try {
+                for (p in Dynamics.curve(sc)) a.put(org.json.JSONObject().put("m", p.m).put("beat", p.beat).put("v", p.v)
+                    .put("L", sc.measures[p.m].length))
+            } catch (e: Exception) {}
+            return a.toString()
+        }
         @JavascriptInterface fun showColors(): Boolean = prefs.getBoolean("xmlColors", true)
         @JavascriptInterface fun showChords(): Boolean = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("xmlChords", true)
         @JavascriptInterface fun chords(): String {

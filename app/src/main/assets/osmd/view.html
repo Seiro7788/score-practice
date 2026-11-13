@@ -13,6 +13,8 @@
   .ch b { display: block; color: #3f51b5; font-size: 12px; }
   .ch i { display: block; color: #b0306a; font-style: normal; font-size: 11px; }
   .hide .ch { display: none; }
+  #dyn { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+  .nodyn #dyn { display: none; }
 </style></head>
 <body>
 <div id="msg">악보를 그리는 중…</div>
@@ -98,9 +100,53 @@
   // redraw at another size (the score re-flows to the screen width); marks and chords follow
   function setZoom(z) {
     osmd.zoom = z; osmd.render(); collect();
-    drawChords(chordList);
+    drawChords(chordList); drawDyn(dynList);
     for (const k of Object.keys(marks)) { const i = marks[k].dataset.i | 0; mark(k, i); }
   }
+  // loudness band under each system: thin & pale = ppp ... thick & deep = fff; hairpins become wedges
+  let dynList = [];
+  function xAt(m, beat, L) {
+    const b = boxes[m], gm = (osmd.GraphicSheet.MeasureList[m] || []).find(g => g && g.staffEntries && g.staffEntries.length);
+    const pts = [[0, b.x0 + 1]];
+    if (gm) for (const se of gm.staffEntries) pts.push([se.relInMeasureTimestamp.RealValue * 4, se.PositionAndShape.AbsolutePosition.x]);
+    pts.push([L > 0 ? L : 4, b.x1 - 0.5]);
+    pts.sort((p, q) => p[0] - q[0]);
+    for (let i = 0; i + 1 < pts.length; i++) if (beat <= pts[i + 1][0]) {
+      const [t0, x0] = pts[i], [t1, x1] = pts[i + 1];
+      return t1 > t0 ? x0 + (x1 - x0) * (beat - t0) / (t1 - t0) : x0;
+    }
+    return b.x1;
+  }
+  function colorOf(v) {   // 25 (pppp) .. 120 (ffff): soft blue -> purple -> deep red
+    const k = Math.max(0, Math.min(1, (v - 25) / 95));
+    return `hsl(${215 + 140 * k}, ${55 + 25 * k}%, ${72 - 30 * k}%)`;
+  }
+  function drawDyn(list) {
+    const old = document.getElementById('dyn'); if (old) old.remove();
+    if (!list.length) return;
+    const host = document.getElementById('osmd'), s = svgEl().getBoundingClientRect(), h = host.getBoundingClientRect(), u = unit();
+    const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
+    svg.id = 'dyn'; svg.setAttribute('width', host.scrollWidth); svg.setAttribute('height', host.scrollHeight);
+    const ox = s.left - h.left, oy = s.top - h.top;
+    // systems: measures sharing a line
+    const lines = {};
+    for (const b of boxes) { const k = Math.round(b.top); (lines[k] = lines[k] || []).push(b); }
+    for (const k of Object.keys(lines)) {
+      const ms = lines[k], base = Math.max(...ms.map(b => b.y1)) * u + oy + 14;
+      const pts = list.filter(p => ms.some(b => b.i === p.m)).map(p => [ox + xAt(p.m, p.beat, p.L) * u, p.v]);
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const [x0, v0] = pts[i], [x1, v1] = pts[i + 1]; if (x1 <= x0) continue;
+        const h0 = 1 + 6 * (v0 - 25) / 95, h1 = 1 + 6 * (v1 - 25) / 95;
+        const poly = document.createElementNS(ns, 'polygon');
+        poly.setAttribute('points', `${x0},${base - h0} ${x1},${base - h1} ${x1},${base + h1} ${x0},${base + h0}`);
+        poly.setAttribute('fill', colorOf((v0 + v1) / 2)); poly.setAttribute('fill-opacity', '0.85');
+        svg.appendChild(poly);
+      }
+    }
+    host.appendChild(svg);
+  }
+  function toggleDyn(on) { document.getElementById('osmd').classList.toggle('nodyn', !on); }
+
   function toggleChords(on) { document.getElementById('osmd').classList.toggle('hide', !on); }
 
   function measureAt(cx, cy) {
@@ -121,7 +167,7 @@
       osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay('osmd', { autoResize: false, backend: 'svg', drawTitle: true, drawPartNames: false, coloringEnabled: true });
       await osmd.load(xml);
       colorize(window.Android ? Android.showColors() : true);
-      osmd.EngravingRules.MinimumDistanceBetweenSystems = 9;   // room for chord labels
+      osmd.EngravingRules.MinimumDistanceBetweenSystems = 14;   // room for the loudness band and chord labels
       osmd.zoom = zoom || 0.6;
       osmd.render();
       collect();
@@ -132,6 +178,7 @@
       });
       if (window.Android) {
         try { chordList = JSON.parse(Android.chords()); drawChords(chordList); toggleChords(Android.showChords()); } catch (e) {}
+        try { dynList = JSON.parse(Android.dynamics()); drawDyn(dynList); toggleDyn(Android.showDyn()); } catch (e) {}
         Android.onReady(boxes.length);
       }
     } catch (err) {

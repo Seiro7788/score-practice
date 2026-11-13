@@ -12,7 +12,7 @@ class PlayChoice(var hands: Int = 2,          // 0 = right, 1 = left, 2 = both
                  var fromIdx: Int = -1, var toIdx: Int = -1)   // measure indices in the file (tapped on the score view)
 
 /** an event on the play timeline (seconds) */
-class TNote(val t: Double, val d: Double, val midi: Int, val step: Char, val hand: Int)
+class TNote(val t: Double, val d: Double, val midi: Int, val step: Char, val hand: Int, val vel: Int = 80)
 
 object Timeline {
     /** notes in play order, in seconds at the given tempo (quarter = bpm) */
@@ -33,11 +33,13 @@ object Timeline {
     fun build(sc: XScore, ch: PlayChoice, bpm: Int): List<TNote> {
         val order = order(sc, ch)
         val byMeasure = sc.notes.groupBy { it.measure }
+        val dyn = Dynamics.curve(sc)          // loudness from p / f marks and hairpins
         val spq = 60.0 / bpm; val out = mutableListOf<TNote>(); var t0 = 0.0
         for (mi in order) {
             for (n in byMeasure[mi] ?: emptyList()) {
                 if (ch.hands != 2 && n.hand != ch.hands) continue
-                out.add(TNote(t0 + n.onset * spq, n.dur * spq, n.midi, n.step, n.hand))
+                val v = (Dynamics.at(dyn, mi, n.onset) - if (n.hand == 1) 6 else 0).coerceIn(20, 127)
+                out.add(TNote(t0 + n.onset * spq, n.dur * spq, n.midi, n.step, n.hand, v))
             }
             t0 += sc.measures[mi].length * spq
         }
@@ -49,7 +51,7 @@ object Timeline {
         val out = mutableListOf<TNote>()
         for (g in notes.groupBy { (it.t * 1000).toLong() }.toSortedMap().values) out.add(g.maxByOrNull { it.midi }!!)
         // a note may not ring into the next one
-        for (i in 0 until out.size - 1) if (out[i].t + out[i].d > out[i + 1].t) out[i] = TNote(out[i].t, out[i + 1].t - out[i].t, out[i].midi, out[i].step, out[i].hand)
+        for (i in 0 until out.size - 1) if (out[i].t + out[i].d > out[i + 1].t) out[i] = TNote(out[i].t, out[i + 1].t - out[i].t, out[i].midi, out[i].step, out[i].hand, out[i].vel)
         return out
     }
 }
@@ -68,7 +70,7 @@ object MidiPlayer {
         val ev = mutableListOf<E>()
         for (n in notes) {
             val a = (n.t * tps).toInt(); val b = maxOf(a + 1, ((n.t + n.d * 0.97) * tps).toInt())
-            ev.add(E(a, true, n.midi, if (n.hand == 0) 88 else 70)); ev.add(E(b, false, n.midi, 0))
+            ev.add(E(a, true, n.midi, n.vel)); ev.add(E(b, false, n.midi, 0))
         }
         ev.sortWith(compareBy({ it.tick }, { if (it.on) 1 else 0 }))
         val tr = ByteArrayOutputStream()

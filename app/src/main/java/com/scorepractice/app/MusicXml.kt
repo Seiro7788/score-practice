@@ -14,7 +14,10 @@ class XMeasure(val number: String, var length: Double = 0.0, var forward: Boolea
                var times: Int = 2, val endings: MutableSet<Int> = mutableSetOf(), var fifths: Int = 0,
                var minor: Boolean = false, var beats: Int = 4, var beatType: Int = 4)
 
-class XScore(val measures: List<XMeasure>, val notes: List<XNote>, val tempo: Int = 0) {   // tempo = first ♩= in the file
+/** a dynamic mark (level = MIDI velocity) or a hairpin start/stop ("crescendo", "diminuendo", "stop") */
+class XDyn(val measure: Int, val pos: Double, val level: Int?, val wedge: String?)
+
+class XScore(val measures: List<XMeasure>, val notes: List<XNote>, val tempo: Int = 0, val dyn: List<XDyn> = emptyList()) {   // tempo = first ♩= in the file
     /** play order of measure indices with repeats and 1st/2nd endings unfolded */
     fun order(): List<Int> {
         val out = mutableListOf<Int>(); var i = 0; var start = 0; var pass = 1
@@ -64,6 +67,7 @@ object MusicXml {
     private val STEP_PC = mapOf('C' to 0, 'D' to 2, 'E' to 4, 'F' to 5, 'G' to 7, 'A' to 9, 'B' to 11)
 
     fun parse(inp: InputStream): XScore {
+        dyns.clear(); inDir = false
         pendingEnding = emptySet(); firstTempo = 0; minorMode = false; tBeats = 4; tType = 4
         val p = Xml.newPullParser(); p.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
         p.setInput(inp, null)
@@ -92,6 +96,10 @@ object MusicXml {
                         "grace" -> if (inNote) isGrace = true
                         "tie" -> if (inNote) { val t = p.getAttributeValue(null, "type"); if (t == "stop") tieStop = true; if (t == "start") tieStart = true }
                         "backup" -> inBackup = true
+                        "direction" -> { inDir = true; dirOffset = 0.0; dirLevel = null; dirWedge = null }
+                        "ppp", "pp", "p", "mp", "mf", "f", "ff", "fff", "pppp", "ffff", "fp", "sfp" ->
+                            if (inDir) dirLevel = LEVELS[p.name]
+                        "wedge" -> if (inDir) dirWedge = p.getAttributeValue(null, "type")
                         "sound" -> if (firstTempo == 0) p.getAttributeValue(null, "tempo")?.toDoubleOrNull()?.let { if (it > 0) firstTempo = it.toInt() }
                         "forward" -> inForward = true
                         "repeat" -> if (part == 0 && mi >= 0) {
@@ -128,6 +136,11 @@ object MusicXml {
                             }
                         }
                         "backup" -> inBackup = false
+                        "offset" -> if (inDir) dirOffset = (t.toDoubleOrNull() ?: 0.0) / divisions
+                        "direction" -> {
+                            inDir = false
+                            if (mi >= 0 && (dirLevel != null || dirWedge != null)) dyns.add(XDyn(mi, maxOf(0.0, pos + dirOffset), dirLevel, dirWedge))
+                        }
                         "forward" -> inForward = false
                         "note" -> {
                             inNote = false
@@ -163,10 +176,15 @@ object MusicXml {
             val rh = mean[0] ?: 66.0; val lh = mean[1] ?: 50.0
             for (n in notes) if (n.part >= 2) { val m = mean[n.part] ?: 60.0; n.hand = if (kotlin.math.abs(m - rh) < kotlin.math.abs(m - lh)) 0 else 1 }
         }
-        return XScore(measures, notes, firstTempo)
+        return XScore(measures, notes, firstTempo, dyns.sortedWith(compareBy({ it.measure }, { it.pos })))
     }
 
     private var pendingEnding: Set<Int> = emptySet()
     private var firstTempo = 0
     private var minorMode = false; private var tBeats = 4; private var tType = 4
+    private var inDir = false; private var dirOffset = 0.0; private var dirLevel: Int? = null; private var dirWedge: String? = null
+    private val dyns = mutableListOf<XDyn>()
+    /** dynamic marks as MIDI velocities (accents like sf count as a loud moment) */
+    val LEVELS = mapOf("pppp" to 22, "ppp" to 30, "pp" to 42, "p" to 55, "mp" to 66, "mf" to 76, "f" to 88, "ff" to 100,
+        "fff" to 112, "ffff" to 120, "fp" to 55, "sfp" to 55)   // sf / sfz / fz: single accents, not a new level
 }

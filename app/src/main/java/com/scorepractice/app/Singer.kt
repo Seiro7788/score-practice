@@ -311,6 +311,8 @@ object Singer {
                 val pre = preRoll(c, n.step)
                 val len = max(1, ((endT - n.t) * RATE).toInt() + pre); val a = max(0, (n.t * RATE).toInt() - pre)
                 val v = sing(c, n.step, f, len, female)
+                val loud = (0.4 + 0.6 * n.vel / 112.0).toFloat()          // sing softer in p, louder in f
+                for (i in v.indices) v[i] *= loud
                 for (i in v.indices) if (a + i < total) mixb[a + i] += v[i]
             }
         }
