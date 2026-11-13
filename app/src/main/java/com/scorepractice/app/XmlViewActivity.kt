@@ -29,7 +29,8 @@ class XmlViewActivity : AppCompatActivity() {
     private lateinit var sc: XScore
     private lateinit var web: WebView
     private lateinit var status: TextView
-    private lateinit var tempo: TextView
+    private lateinit var tempo: android.widget.EditText
+    private var playA = -1; private var playB = -1
     private val main = Handler(Looper.getMainLooper())
     private val players = mutableListOf<MediaPlayer>()
     private var from = -1
@@ -67,11 +68,24 @@ class XmlViewActivity : AppCompatActivity() {
         bar.addView(small(hands[data.playHands]) { b -> data.playHands = (data.playHands + 1) % 3; b.text = hands[data.playHands]; saveData(); stop() })
         bar.addView(small(sounds[data.playSound]) { b -> data.playSound = (data.playSound + 1) % 3; b.text = sounds[data.playSound]; saveData(); stop() })
         bar.addView(CheckBox(this).apply { text = "반복"; setOnCheckedChangeListener { _, v -> loop = v; players.forEach { it.isLooping = v } } })
-        bar.addView(small("−") { setBpm(bpm - 5) })
-        tempo = TextView(this).apply { textSize = 15f; gravity = Gravity.CENTER; setPadding(dp(2), 0, dp(2), 0) }
-        bar.addView(tempo)
-        bar.addView(small("+") { setBpm(bpm + 5) })
         root.addView(bar)
+        // tempo row: −5 −1 [♩= typed number] +1 +5 [악보 빠르기]
+        val tbar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), 0, dp(4), dp(2)); setBackgroundColor(Color.rgb(243, 238, 248)) }
+        tbar.addView(small("−5") { setBpm(bpm - 5) }); tbar.addView(small("−1") { setBpm(bpm - 1) })
+        tbar.addView(TextView(this).apply { text = " ♩="; textSize = 16f })
+        tempo = android.widget.EditText(this).apply {
+            textSize = 18f; gravity = Gravity.CENTER; inputType = android.text.InputType.TYPE_CLASS_NUMBER; minEms = 2
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE; setSelectAllOnFocus(true)
+            setOnEditorActionListener { v, _, _ ->
+                text.toString().toIntOrNull()?.let { setBpm(it) }
+                (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(v.windowToken, 0)
+                clearFocus(); true
+            }
+        }
+        tbar.addView(tempo, LinearLayout.LayoutParams(0, -2, 1f))
+        tbar.addView(small("+1") { setBpm(bpm + 1) }); tbar.addView(small("+5") { setBpm(bpm + 5) })
+        if (sc.tempo > 0) tbar.addView(small("악보 ♩=${sc.tempo}") { setBpm(sc.tempo) })
+        root.addView(tbar)
         setContentView(root, ViewGroup.LayoutParams(-1, -1))
         setBpm(bpm); idleText()
     }
@@ -79,10 +93,12 @@ class XmlViewActivity : AppCompatActivity() {
     private fun saveData() = Store.saveData(this, score.id, data)
 
     private fun setBpm(v: Int) {
-        bpm = v.coerceIn(20, 300); tempo.text = "♩=$bpm"
+        bpm = v.coerceIn(20, 300)
+        if (tempo.text.toString() != bpm.toString()) tempo.setText(bpm.toString())
         data.bpm = bpm; saveData()
         getSharedPreferences("settings", MODE_PRIVATE).edit().putInt("tempo_last", bpm).apply()
-        if (players.isNotEmpty()) stop()
+        // playing: carry on at the new tempo from the measure being played
+        if (players.isNotEmpty()) { val at = if (lastMark >= 0) lastMark else playA; stopPlayers(); play(at, playB) }
     }
 
     private fun idleText() { status.text = "시작할 마디를 누르세요" }
@@ -113,6 +129,7 @@ class XmlViewActivity : AppCompatActivity() {
     }
 
     private fun play(a: Int, b: Int) {
+        playA = a; playB = b
         val ch = PlayChoice(data.playHands, loop = loop, fromIdx = a, toIdx = b)
         val sound = data.playSound
         status.text = "준비 중…"

@@ -13,7 +13,7 @@ class XNote(val measure: Int, val onset: Double, var dur: Double, val midi: Int,
 class XMeasure(val number: String, var length: Double = 0.0, var forward: Boolean = false, var backward: Boolean = false,
                var times: Int = 2, val endings: MutableSet<Int> = mutableSetOf(), var fifths: Int = 0)
 
-class XScore(val measures: List<XMeasure>, val notes: List<XNote>) {
+class XScore(val measures: List<XMeasure>, val notes: List<XNote>, val tempo: Int = 0) {   // tempo = first ♩= in the file
     /** play order of measure indices with repeats and 1st/2nd endings unfolded */
     fun order(): List<Int> {
         val out = mutableListOf<Int>(); var i = 0; var start = 0; var pass = 1
@@ -63,7 +63,7 @@ object MusicXml {
     private val STEP_PC = mapOf('C' to 0, 'D' to 2, 'E' to 4, 'F' to 5, 'G' to 7, 'A' to 9, 'B' to 11)
 
     fun parse(inp: InputStream): XScore {
-        pendingEnding = emptySet()
+        pendingEnding = emptySet(); firstTempo = 0
         val p = Xml.newPullParser(); p.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
         p.setInput(inp, null)
         val measures = mutableListOf<XMeasure>(); val notes = mutableListOf<XNote>()
@@ -90,6 +90,7 @@ object MusicXml {
                         "grace" -> if (inNote) isGrace = true
                         "tie" -> if (inNote) { val t = p.getAttributeValue(null, "type"); if (t == "stop") tieStop = true; if (t == "start") tieStart = true }
                         "backup" -> inBackup = true
+                        "sound" -> if (firstTempo == 0) p.getAttributeValue(null, "tempo")?.toDoubleOrNull()?.let { if (it > 0) firstTempo = it.toInt() }
                         "forward" -> inForward = true
                         "repeat" -> if (part == 0 && mi >= 0) {
                             val m = measures[mi]
@@ -157,8 +158,9 @@ object MusicXml {
             val rh = mean[0] ?: 66.0; val lh = mean[1] ?: 50.0
             for (n in notes) if (n.part >= 2) { val m = mean[n.part] ?: 60.0; n.hand = if (kotlin.math.abs(m - rh) < kotlin.math.abs(m - lh)) 0 else 1 }
         }
-        return XScore(measures, notes)
+        return XScore(measures, notes, firstTempo)
     }
 
     private var pendingEnding: Set<Int> = emptySet()
+    private var firstTempo = 0
 }
