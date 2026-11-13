@@ -82,7 +82,7 @@ class MainActivity : AppCompatActivity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {
             1 -> pickFolder.launch(null)
-            2 -> makeBackup.launch("악보연습_백업_" + java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.KOREA).format(java.util.Date()) + ".zip")
+            2 -> makeBackup.launch("오선노트_백업_" + java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.KOREA).format(java.util.Date()) + ".zip")
             3 -> loadBackup.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed"))
             else -> return super.onOptionsItemSelected(item)
         }
