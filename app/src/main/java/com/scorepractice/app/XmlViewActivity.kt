@@ -37,6 +37,8 @@ class XmlViewActivity : AppCompatActivity() {
     private var times: List<Pair<Int, Double>> = emptyList()
     private var loop = false
     private var bpm = 100
+    private val prefs by lazy { getSharedPreferences("settings", MODE_PRIVATE) }
+    private var scoreZoom = 0.55
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -48,15 +50,22 @@ class XmlViewActivity : AppCompatActivity() {
         data = Store.loadData(this, id)
         val f = File(Store.scoreDir(this), "$id.musicxml")
         sc = try { MusicXml.load(f) } catch (e: Exception) { Toast.makeText(this, "XML을 읽지 못했습니다", Toast.LENGTH_LONG).show(); finish(); return }
+        scoreZoom = prefs.getFloat("xmlZoom", if (resources.displayMetrics.widthPixels > 1400) 0.8f else 0.55f).toDouble()
         bpm = if (data.bpm > 0) data.bpm else getSharedPreferences("settings", MODE_PRIVATE).getInt("tempo_last", 100)
         title = "악보(XML) · " + score.shownTitle
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.WHITE) }
-        status = TextView(this).apply { setPadding(dp(12), dp(6), dp(12), dp(6)); textSize = 14f; setBackgroundColor(Color.rgb(238, 246, 238)) }
-        root.addView(status)
+        // top row: status + score size (redraw bigger / smaller; two fingers also zoom the page)
+        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(Color.rgb(238, 246, 238)) }
+        status = TextView(this).apply { setPadding(dp(12), dp(6), dp(6), dp(6)); textSize = 14f; setTextColor(Color.rgb(30, 30, 30)) }
+        top.addView(status, LinearLayout.LayoutParams(0, -2, 1f))
+        for ((t, f) in listOf("가−" to 0.85, "가+" to 1.18)) top.addView(Button(this).apply {
+            text = t; isAllCaps = false; minWidth = 0; minimumWidth = 0; setOnClickListener { zoomBy(f) } })
+        root.addView(top)
         web = WebView(this)
         web.settings.javaScriptEnabled = true
         web.settings.allowFileAccess = true
+        web.settings.setSupportZoom(true); web.settings.builtInZoomControls = true; web.settings.displayZoomControls = false   // pinch
         web.addJavascriptInterface(Bridge(xmlText = MusicXml.text(f)), "Android")
         web.loadUrl("file:///android_asset/osmd/view.html")
         root.addView(web, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -94,6 +103,12 @@ class XmlViewActivity : AppCompatActivity() {
         setBpm(bpm); idleText()
     }
 
+    private fun zoomBy(f: Double) {
+        scoreZoom = (scoreZoom * f).coerceIn(0.3, 2.0)
+        prefs.edit().putFloat("xmlZoom", scoreZoom.toFloat()).apply()
+        js("setZoom($scoreZoom)")
+    }
+
     private fun saveData() = Store.saveData(this, score.id, data)
 
     private fun setBpm(v: Int) {
@@ -111,7 +126,7 @@ class XmlViewActivity : AppCompatActivity() {
 
     inner class Bridge(private val xmlText: String) {
         @JavascriptInterface fun xml(): String = xmlText
-        @JavascriptInterface fun zoom(): Double = if (resources.displayMetrics.widthPixels > 1400) 0.8 else 0.55
+        @JavascriptInterface fun zoom(): Double = scoreZoom
         @JavascriptInterface fun onReady(n: Int) { main.post { status.text = "${n}마디 · 시작할 마디를 누르세요" } }
         @JavascriptInterface fun onError(msg: String) { main.post { status.text = "악보를 그리지 못했습니다: $msg" } }
         @JavascriptInterface fun onMeasure(i: Int) { main.post { tapped(i) } }

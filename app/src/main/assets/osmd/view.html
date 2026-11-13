@@ -1,6 +1,6 @@
 <!doctype html>
 <html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=0.5,maximum-scale=4,user-scalable=yes">
 <style>
   body { margin: 0; background: #fff; font-family: sans-serif; }
   #osmd { position: relative; }
@@ -51,7 +51,7 @@
     if (marks[kind]) { marks[kind].remove(); delete marks[kind]; }
     if (i < 0 || !boxes[i]) return;
     const p = px(boxes[i]), d = document.createElement('div');
-    d.className = 'box ' + kind;
+    d.className = 'box ' + kind; d.dataset.i = i;
     Object.assign(d.style, { left: p.left + 'px', top: p.top + 'px', width: p.w + 'px', height: p.h + 'px' });
     document.getElementById('osmd').appendChild(d); marks[kind] = d;
     if (scroll) {
@@ -79,6 +79,13 @@
       d.style.top = (s.top - h.top + b.top * u - 36) + 'px';   // just above the top staff line
       host.appendChild(d);
     }
+  }
+  let chordList = [];
+  // redraw at another size (the score re-flows to the screen width); marks and chords follow
+  function setZoom(z) {
+    osmd.zoom = z; osmd.render(); collect();
+    drawChords(chordList);
+    for (const k of Object.keys(marks)) { const i = marks[k].dataset.i | 0; mark(k, i); }
   }
   function toggleChords(on) { document.getElementById('osmd').classList.toggle('hide', !on); }
 
@@ -109,7 +116,7 @@
         if (i >= 0 && window.Android) Android.onMeasure(i);
       });
       if (window.Android) {
-        try { drawChords(JSON.parse(Android.chords())); toggleChords(Android.showChords()); } catch (e) {}
+        try { chordList = JSON.parse(Android.chords()); drawChords(chordList); toggleChords(Android.showChords()); } catch (e) {}
         Android.onReady(boxes.length);
       }
     } catch (err) {
