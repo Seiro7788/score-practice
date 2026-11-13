@@ -72,7 +72,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         })
         pageNo.text = "${pager.currentItem + 1}/${pdf.pageCount}"
 
-        btnRange.setOnClickListener { setMode(if (mode == PageView.Mode.RANGE) PageView.Mode.VIEW else PageView.Mode.RANGE) }
+        btnRange.setOnClickListener { switchMode(if (mode == PageView.Mode.RANGE) PageView.Mode.VIEW else PageView.Mode.RANGE) }
         findViewById<Button>(R.id.btnLayer).setOnClickListener { layerDialog() }
         findViewById<Button>(R.id.btnMenu).setOnClickListener { menuDialog() }
         findViewById<Button>(R.id.penBlack).setOnClickListener { pen(Color.BLACK, 0.003f) }
@@ -85,7 +85,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             val last = data.strokes.lastOrNull { it.page == p }
             if (last != null) { data.strokes.remove(last); onInkChanged() }
         }
-        findViewById<Button>(R.id.penDone).setOnClickListener { setMode(PageView.Mode.VIEW) }
+        findViewById<Button>(R.id.penDone).setOnClickListener { switchMode(PageView.Mode.VIEW) }
     }
 
     /** "오른쪽으로 밀면 다음 쪽" = right-to-left page order */
@@ -95,7 +95,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     private fun pen(c: Int, w: Float) { penColor = c; penWidth = w; erasing = false }
 
-    private fun setMode(m: PageView.Mode) {
+    private fun switchMode(m: PageView.Mode) {
         mode = m
         pager.isUserInputEnabled = m == PageView.Mode.VIEW
         penBar.visibility = if (m == PageView.Mode.PEN) View.VISIBLE else View.GONE
@@ -106,7 +106,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     }
 
     // ---- PageView.Host
-    override fun onDoubleTap(page: Int) { if (mode == PageView.Mode.VIEW) { setMode(PageView.Mode.PEN); toast("필기 모드 — 다 쓰면 '완료'") } }
+    override fun onDoubleTap(page: Int) { if (mode == PageView.Mode.VIEW) { switchMode(PageView.Mode.PEN); toast("필기 모드 — 다 쓰면 '완료'") } }
 
     override fun onRangeTap(r: Range) {
         r.count++; r.log.add(System.currentTimeMillis()); save(); redraw()
