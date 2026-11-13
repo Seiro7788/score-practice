@@ -37,7 +37,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     override var penWidth = 0.003f
     override val penStraight: Boolean
         get() = straight && Color.alpha(penColor) < 255
-    private var straight = true
+    private var straight = false
     private var penLayerLabel: (() -> Unit)? = null
     private var penSize = 1; private var hiSize = 1
     private val PEN_WIDTHS = floatArrayOf(0.0018f, 0.003f, 0.005f)
@@ -102,7 +102,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         pager = findViewById(R.id.pager)
         applyDirection()
         half = prefs.getBoolean("halfPage", false)
-        straight = prefs.getBoolean("hiStraight", true)
+        straight = prefs.getBoolean("hiStraight2", false)
         pager.adapter = PageAdapter()
         pager.offscreenPageLimit = 1
         pager.setCurrentItem(posOf(data.lastPage), false)
@@ -146,7 +146,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         })
         penSw.addView(Button(this).apply {
             text = if (straight) "곧게 ✓" else "곧게"; isAllCaps = false; minWidth = 0; minimumWidth = 0
-            setOnClickListener { straight = !straight; prefs.edit().putBoolean("hiStraight", straight).apply(); text = if (straight) "곧게 ✓" else "곧게" }
+            setOnClickListener { straight = !straight; prefs.edit().putBoolean("hiStraight2", straight).apply(); text = if (straight) "곧게 ✓" else "곧게" }
         })
         penSw.addView(Button(this).apply {
             isAllCaps = false; minWidth = 0; minimumWidth = 0

@@ -68,7 +68,8 @@ object PdfExport {
         }
         if (opt.ink) {
             val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
-            for (s in d.strokes.sortedBy { if (Color.alpha(it.color) < 255) 0 else 1 }) if (s.page == page && d.strokeVisible(s)) {
+            Highlight.bake(bm, d.strokes.filter { it.page == page && Highlight.isHighlighter(it) && d.strokeVisible(it) })
+            for (s in d.strokes) if (s.page == page && !Highlight.isHighlighter(s) && d.strokeVisible(s)) {
                 ink.color = s.color; ink.strokeWidth = s.width * W
                 ink.strokeCap = if (Color.alpha(s.color) < 255) Paint.Cap.BUTT else Paint.Cap.ROUND
                 val path = Path(); path.moveTo(sx(s.pts[0]), sy(s.pts[1]))

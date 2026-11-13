@@ -70,15 +70,24 @@ class PageView(context: Context, private val host: Host) : View(context) {
 
     fun clearBitmaps() { origs.clear(); shown.clear(); sps.clear() }
 
-    fun refreshFixes() {
-        shown.clear()
-        for ((p, o) in origs) {
-            val mine = if (host.data.showFixes) host.data.fixes.filter { it.page == p } else emptyList()
-            shown[p] = if (mine.isEmpty()) o else o.copy(Bitmap.Config.ARGB_8888, true).also { bm ->
-                for (f in mine) HeadFix.apply(bm, f.x * bm.width, f.y * bm.height, f.r * bm.width, f.rb * bm.width, f.hollow, f.color)
-            }
+    private val bakedKey = mutableMapOf<Int, Int>()
+
+    fun refreshFixes() { bakedKey.clear(); shown.clear(); invalidate() }
+
+    /** page bitmap with colour fixes and highlighter baked in; rebuilt only when those change */
+    private fun baked(p: Int): Bitmap? {
+        val o = origs[p] ?: return null
+        val fx = if (host.data.showFixes) host.data.fixes.filter { it.page == p } else emptyList()
+        val hi = host.data.strokes.filter { it.page == p && Highlight.isHighlighter(it) && host.data.strokeVisible(it) }
+        var key = fx.hashCode()
+        for (s in hi) key = key * 31 + System.identityHashCode(s)
+        val have = shown[p]
+        if (have != null && bakedKey[p] == key) return have
+        val bm = if (fx.isEmpty() && hi.isEmpty()) o else o.copy(Bitmap.Config.ARGB_8888, true).also { bm ->
+            for (f in fx) HeadFix.apply(bm, f.x * bm.width, f.y * bm.height, f.r * bm.width, f.rb * bm.width, f.hollow, f.color)
+            Highlight.bake(bm, hi)
         }
-        invalidate()
+        shown[p] = bm; bakedKey[p] = key; return bm
     }
 
     private val segRects = mutableListOf<RectF>()   // visible part of each slice
@@ -219,7 +228,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
         layoutPage()
         c.save(); c.translate(tx, ty); c.scale(z, z)
         for (i in segs.indices) {
-        val b = shown[segs[i].page] ?: continue
+        val b = baked(segs[i].page) ?: continue
         select(i)
         c.save(); c.clipRect(segRects[i])
         c.drawBitmap(b, null, dst, bmpPaint)
@@ -244,7 +253,6 @@ class PageView(context: Context, private val host: Host) : View(context) {
             c.drawText(g.n.toString(), sx(g.x), yb, fingerHalo); c.drawText(g.n.toString(), sx(g.x), yb, fingerPaint)
         }
         if (host.data.showInk) {
-            for (s in host.data.strokes) if (s.page == page && Color.alpha(s.color) < 255 && host.data.strokeVisible(s)) drawStroke(c, s.pts, s.color, s.width)
             for (s in host.data.strokes) if (s.page == page && Color.alpha(s.color) == 255 && host.data.strokeVisible(s)) drawStroke(c, s.pts, s.color, s.width)
         }
         if (i == touchSeg && cur.size >= 2) drawStroke(c,
