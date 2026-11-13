@@ -30,6 +30,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
         val mode: Mode
         val penColor: Int
         val penWidth: Float
+        val penStraight: Boolean   // highlighter: keep only a straight line from start to end
         val erasing: Boolean
         val selectedRange: String?
         fun onDoubleTap(page: Int)
@@ -242,8 +243,13 @@ class PageView(context: Context, private val host: Host) : View(context) {
             val yb = sy(g.y) + ts * 0.36f
             c.drawText(g.n.toString(), sx(g.x), yb, fingerHalo); c.drawText(g.n.toString(), sx(g.x), yb, fingerPaint)
         }
-        if (host.data.showInk) for (s in host.data.strokes) if (s.page == page) drawStroke(c, s.pts, s.color, s.width)
-        if (i == touchSeg && cur.size >= 2) drawStroke(c, cur.toFloatArray(), host.penColor, host.penWidth)
+        if (host.data.showInk) {
+            for (s in host.data.strokes) if (s.page == page && Color.alpha(s.color) < 255) drawStroke(c, s.pts, s.color, s.width)
+            for (s in host.data.strokes) if (s.page == page && Color.alpha(s.color) == 255) drawStroke(c, s.pts, s.color, s.width)
+        }
+        if (i == touchSeg && cur.size >= 2) drawStroke(c,
+            if (host.penStraight && cur.size >= 4) floatArrayOf(cur[0], cur[1], cur[cur.size - 2], cur[cur.size - 1]) else cur.toFloatArray(),
+            host.penColor, host.penWidth)
         val a = dragStart; val e = dragNow
         if (i == touchSeg && a != null && e != null) {
             edge.color = Color.MAGENTA; edge.strokeWidth = 4f / z
@@ -294,6 +300,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
 
     private fun drawStroke(c: Canvas, pts: FloatArray, color: Int, w: Float) {
         ink.color = color; ink.strokeWidth = w * dst.width()
+        ink.strokeCap = if (Color.alpha(color) < 255) Paint.Cap.BUTT else Paint.Cap.ROUND
         val p = Path(); p.moveTo(sx(pts[0]), sy(pts[1]))
         if (pts.size == 2) p.lineTo(sx(pts[0]) + 0.5f, sy(pts[1]))
         var i = 2
@@ -422,7 +429,8 @@ class PageView(context: Context, private val host: Host) : View(context) {
                     val r = Runnable { host.data.strokes.add(Stroke(pg, host.penColor, host.penWidth, dot)); host.onInkChanged() }
                     pendingDot = r; postDelayed(r, 350)
                 } else if (cur.size >= 4) {
-                    host.data.strokes.add(Stroke(page, host.penColor, host.penWidth, cur.toFloatArray())); host.onInkChanged()
+                    val pts = if (host.penStraight) floatArrayOf(cur[0], cur[1], cur[cur.size - 2], cur[cur.size - 1]) else cur.toFloatArray()
+                    host.data.strokes.add(Stroke(page, host.penColor, host.penWidth, pts)); host.onInkChanged()
                 }
                 cur.clear()
             }

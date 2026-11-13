@@ -35,6 +35,14 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     override var mode = PageView.Mode.VIEW
     override var penColor = Color.BLACK
     override var penWidth = 0.003f
+    override val penStraight: Boolean
+        get() = straight && Color.alpha(penColor) < 255
+    private var straight = true
+    private var penSize = 1; private var hiSize = 1
+    private val PEN_WIDTHS = floatArrayOf(0.0018f, 0.003f, 0.005f)
+    private val HI_WIDTHS = floatArrayOf(0.009f, 0.014f, 0.022f)
+    private val HI_YELLOW = Color.argb(95, 255, 225, 0); private val HI_GREEN = Color.argb(85, 60, 220, 60)
+    private val HI_PINK = Color.argb(80, 255, 60, 160); private val HI_BLUE = Color.argb(80, 40, 170, 255)
     override var erasing = false
     override var selectedRange: String? = null
     private lateinit var practiceBar: View
@@ -93,6 +101,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         pager = findViewById(R.id.pager)
         applyDirection()
         half = prefs.getBoolean("halfPage", false)
+        straight = prefs.getBoolean("hiStraight", true)
         pager.adapter = PageAdapter()
         pager.offscreenPageLimit = 1
         pager.setCurrentItem(posOf(data.lastPage), false)
@@ -110,15 +119,34 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         findViewById<Button>(R.id.btnLayer).setOnClickListener { layerDialog() }
         findViewById<Button>(R.id.btnMenu).setOnClickListener { menuDialog() }
         findViewById<Button>(R.id.btnFull).setOnClickListener { if (mode != PageView.Mode.VIEW) switchMode(PageView.Mode.VIEW); hideMenus(true) }
+        // pens (opaque) and highlighters (see-through, drawn under the notes' darkness)
         val penSw = findViewById<LinearLayout>(R.id.penSwatches)
-        val pens = listOf(Color.BLACK to 0.003f, Color.rgb(220, 30, 30) to 0.003f, Color.rgb(30, 80, 220) to 0.003f,
-            Color.argb(110, 255, 220, 0) to 0.014f)
+        val pens = listOf(Color.BLACK, Color.rgb(220, 30, 30), Color.rgb(30, 80, 220),
+            HI_YELLOW, HI_GREEN, HI_PINK, HI_BLUE)
         val penViews = mutableListOf<View>()
-        pens.forEachIndexed { i, (c, w) ->
-            val v = swatch(c, i == 0, big = w > 0.01f)
-            v.setOnClickListener { pen(c, w); penViews.forEachIndexed { j, o -> mark(o, pens[j].first, j == i) } }
+        pens.forEachIndexed { i, c ->
+            val v = swatch(c, i == 0, big = Color.alpha(c) < 255)
+            if (i == 3) penSw.addView(TextView(this).apply { text = " 형광 "; textSize = 12f })
+            v.setOnClickListener {
+                val hi = Color.alpha(c) < 255
+                pen(c, if (hi) HI_WIDTHS[hiSize] else PEN_WIDTHS[penSize])
+                penViews.forEachIndexed { j, o -> mark(o, pens[j], j == i) }
+                toast(if (hi) "형광펜" + (if (straight) " (곧게)" else "") else "펜")
+            }
             penViews.add(v); penSw.addView(v)
         }
+        penSw.addView(Button(this).apply {
+            text = "굵기"; isAllCaps = false; minWidth = 0; minimumWidth = 0
+            setOnClickListener {
+                if (Color.alpha(penColor) < 255) { hiSize = (hiSize + 1) % 3; penWidth = HI_WIDTHS[hiSize] }
+                else { penSize = (penSize + 1) % 3; penWidth = PEN_WIDTHS[penSize] }
+                toast(arrayOf("가늘게", "보통", "굵게")[if (Color.alpha(penColor) < 255) hiSize else penSize])
+            }
+        })
+        penSw.addView(Button(this).apply {
+            text = if (straight) "곧게 ✓" else "곧게"; isAllCaps = false; minWidth = 0; minimumWidth = 0
+            setOnClickListener { straight = !straight; prefs.edit().putBoolean("hiStraight", straight).apply(); text = if (straight) "곧게 ✓" else "곧게" }
+        })
         findViewById<Button>(R.id.penErase).setOnClickListener { erasing = true; toast("지우개: 지울 선을 문지르세요") }
         findViewById<Button>(R.id.undo).setOnClickListener { undo() }
         findViewById<Button>(R.id.redo).setOnClickListener { redo() }
