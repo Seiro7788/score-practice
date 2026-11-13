@@ -118,8 +118,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun refresh() {
         val q = search.text.toString().trim().lowercase()
-        shown = all.filter { q.isEmpty() || it.title.lowercase().contains(q) || it.composer.lowercase().contains(q) }
-            .sortedWith(compareBy({ it.composer.lowercase() }, { it.title.lowercase() }))
+        shown = all.filter { q.isEmpty() || it.shownTitle.lowercase().contains(q) || it.composer.lowercase().contains(q) }
+            .sortedWith(compareBy({ it.composer.lowercase() }, { it.shownTitle.lowercase() }))
         empty.visibility = if (all.isEmpty()) View.VISIBLE else View.GONE
         // grouped by composer; tap a composer to fold / unfold (searching shows everything)
         val r = mutableListOf<Any>()
@@ -150,18 +150,19 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Toast.makeText(this, "파일을 가져오지 못했습니다: ${e.message}", Toast.LENGTH_LONG).show(); return
         }
-        val s = Score(id, displayName(uri), "", fname, System.currentTimeMillis())
+        val name = displayName(uri)
+        val s = Score(id, name, "", fname, System.currentTimeMillis(), origName = name)
         editInfo(s, isNew = true)
     }
 
     private fun editInfo(s: Score, isNew: Boolean) {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 16, 48, 0) }
         val comp = EditText(this).apply { hint = "작곡가"; setText(s.composer) }
-        val tit = EditText(this).apply { hint = "제목"; setText(s.title) }
+        val tit = EditText(this).apply { hint = "제목 (비우면 파일 이름)"; setText(s.title) }
         box.addView(comp); box.addView(tit)
         AlertDialog.Builder(this).setTitle(if (isNew) "악보 정보" else "정보 수정").setView(box)
             .setPositiveButton("저장") { _, _ ->
-                s.composer = comp.text.toString().trim(); s.title = tit.text.toString().trim().ifEmpty { "제목 없음" }
+                s.composer = comp.text.toString().trim(); s.title = tit.text.toString().trim()   // empty = show the file name
                 if (isNew) all.add(s)
                 Store.saveLibrary(this, all); refresh(); Thread { Backup.sync(this) }.start()
             }
@@ -170,10 +171,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun itemMenu(s: Score) {
-        AlertDialog.Builder(this).setTitle(s.title)
+        AlertDialog.Builder(this).setTitle(s.shownTitle)
             .setItems(arrayOf("제목·작곡가 수정", "삭제")) { _, w ->
                 if (w == 0) editInfo(s, false)
-                else AlertDialog.Builder(this).setMessage("'${s.title}'을(를) 삭제할까요? 연습 기록과 필기도 지워집니다.")
+                else AlertDialog.Builder(this).setMessage("'${s.shownTitle}'을(를) 삭제할까요? 연습 기록과 필기도 지워집니다.")
                     .setPositiveButton("삭제") { _, _ -> all.remove(s); Store.deleteScore(this, s); Store.saveLibrary(this, all); refresh(); Thread { Backup.sync(this) }.start() }
                     .setNegativeButton("취소", null).show()
             }.show()
@@ -213,7 +214,7 @@ class MainActivity : AppCompatActivity() {
             }
             val s = item as Score
             val row = h.itemView as LinearLayout; val box = row.getChildAt(0) as LinearLayout
-            (box.getChildAt(0) as TextView).text = s.title
+            (box.getChildAt(0) as TextView).text = s.shownTitle
             val sum = try { PracticeStats.summary(Store.loadData(this@MainActivity, s.id)) } catch (e: Exception) { "" }
             (box.getChildAt(1) as TextView).text = sum.ifEmpty { "아직 연습 기록 없음" }
             box.setOnClickListener { startActivity(Intent(this@MainActivity, ViewerActivity::class.java).putExtra("id", s.id)) }

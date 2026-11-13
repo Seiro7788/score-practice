@@ -64,7 +64,7 @@ object Backup {
         val mine = Store.loadLibrary(c); val a = JSONArray(libText); var n = 0
         for (i in 0 until a.length()) {
             val o = a.getJSONObject(i)
-            val s = Score(o.getString("id"), o.optString("title"), o.optString("composer"), o.getString("file"), o.optLong("added"))
+            val s = Score(o.getString("id"), o.optString("title"), o.optString("composer"), o.getString("file"), o.optLong("added"), o.optString("origName"))
             val pdf = open(s.file) ?: continue
             pdf.use { inp -> File(Store.scoreDir(c), s.file).outputStream().use { inp.copyTo(it) } }
             open("${s.id}.json")?.use { inp -> File(Store.scoreDir(c), "${s.id}.json").outputStream().use { inp.copyTo(it) } }

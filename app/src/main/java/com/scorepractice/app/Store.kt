@@ -12,8 +12,12 @@ data class Score(
     var title: String,
     var composer: String,
     val file: String,
-    val added: Long
-)
+    val added: Long,
+    var origName: String = ""     // file name it was imported from (used when no title is given)
+) {
+    /** title to show: the given title, otherwise the original file name */
+    val shownTitle get() = title.ifEmpty { origName.ifEmpty { "제목 없음" } }
+}
 
 /** a named practice layer (e.g. "1주차", "왼손") holding practice ranges */
 data class Layer(val id: String, var name: String, var color: Int, var visible: Boolean = true)
@@ -80,7 +84,9 @@ object Store {
         for (i in 0 until a.length()) {
             val o = a.getJSONObject(i)
             out.add(Score(o.getString("id"), o.optString("title"), o.optString("composer"),
-                o.getString("file"), o.optLong("added")))
+                o.getString("file"), o.optLong("added"), o.optString("origName")).also {
+                    if (it.title == "제목 없음") it.title = ""   // older entries: show the file name instead
+                })
         }
         return out
     }
@@ -88,7 +94,7 @@ object Store {
     fun saveLibrary(c: Context, list: List<Score>) {
         val a = JSONArray()
         for (s in list) a.put(JSONObject().put("id", s.id).put("title", s.title)
-            .put("composer", s.composer).put("file", s.file).put("added", s.added))
+            .put("composer", s.composer).put("file", s.file).put("added", s.added).put("origName", s.origName))
         writeSafe(libFile(c), a.toString())
     }
 

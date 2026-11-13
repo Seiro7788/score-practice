@@ -76,16 +76,16 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         pdf = PdfRenderer(fd)
 
         val titleView = findViewById<TextView>(R.id.title)
-        val showTitle = { titleView.text = if (score.composer.isNotEmpty()) "${score.composer} · ${score.title}" else score.title }
+        val showTitle = { titleView.text = if (score.composer.isNotEmpty()) "${score.composer} · ${score.shownTitle}" else score.shownTitle }
         showTitle()
         titleView.setOnClickListener {   // edit title / composer
             val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 16, 48, 0) }
             val comp = EditText(this).apply { hint = "작곡가"; setText(score.composer) }
-            val tit = EditText(this).apply { hint = "제목"; setText(score.title) }
+            val tit = EditText(this).apply { hint = "제목 (비우면 파일 이름)"; setText(score.title) }
             box.addView(comp); box.addView(tit)
             AlertDialog.Builder(this).setTitle("제목·작곡가 수정").setView(box).setPositiveButton("저장") { _, _ ->
                 val lib = Store.loadLibrary(this)
-                lib.firstOrNull { it.id == score.id }?.let { it.composer = comp.text.toString().trim(); it.title = tit.text.toString().trim().ifEmpty { "제목 없음" }; score = it }
+                lib.firstOrNull { it.id == score.id }?.let { it.composer = comp.text.toString().trim(); it.title = tit.text.toString().trim(); score = it }
                 Store.saveLibrary(this, lib); showTitle()
             }.setNegativeButton("취소", null).show()
         }
@@ -490,7 +490,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         for ((name, on, set) in items) box.addView(CheckBox(this).apply { text = name; isChecked = on; setOnCheckedChangeListener { _, v -> set(v) } })
         AlertDialog.Builder(this).setTitle("PDF로 저장 — 넣을 것").setView(box)
             .setPositiveButton("저장 위치 고르기") { _, _ ->
-                val base = (if (score.composer.isNotEmpty()) score.composer + "_" else "") + score.title
+                val base = (if (score.composer.isNotEmpty()) score.composer + "_" else "") + score.shownTitle
                 createPdf.launch(base.replace(Regex("[\\\\/:*?\"<>|]"), "_") + "_연습본.pdf")
             }.setNegativeButton("취소", null).show()
     }
@@ -510,7 +510,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     }
 
     private fun openRecord() {
-        PracticeLog.show(this, score.title, data,
+        PracticeLog.show(this, score.shownTitle, data,
             onJump = { r -> pager.setCurrentItem(posOf(r.page), false); selectedRange = r.id; updatePracticeBar() },
             onEdit = { r -> pager.setCurrentItem(posOf(r.page), false); selectedRange = r.id; updatePracticeBar(); onRangeLongPress(r) })
     }
