@@ -26,6 +26,9 @@ import java.io.File
 class MainActivity : AppCompatActivity() {
     private var all = mutableListOf<Score>()
     private var shown = listOf<Score>()
+    /** rows of the list: a composer header (String) or a score */
+    private var rows = listOf<Any>()
+    private val collapsed = mutableSetOf<String>()
     private lateinit var list: RecyclerView
     private lateinit var empty: TextView
     private lateinit var search: EditText
@@ -118,8 +121,17 @@ class MainActivity : AppCompatActivity() {
         shown = all.filter { q.isEmpty() || it.title.lowercase().contains(q) || it.composer.lowercase().contains(q) }
             .sortedWith(compareBy({ it.composer.lowercase() }, { it.title.lowercase() }))
         empty.visibility = if (all.isEmpty()) View.VISIBLE else View.GONE
+        // grouped by composer; tap a composer to fold / unfold (searching shows everything)
+        val r = mutableListOf<Any>()
+        for ((comp, items) in shown.groupBy { it.composer.ifEmpty { "작곡가 미지정" } }) {
+            r.add(comp)
+            if (q.isNotEmpty() || comp !in collapsed) r.addAll(items)
+        }
+        rows = r
         list.adapter?.notifyDataSetChanged()
     }
+
+    private fun countOf(comp: String) = shown.count { it.composer.ifEmpty { "작곡가 미지정" } == comp }
 
     private fun displayName(uri: Uri): String {
         var name = "악보"
@@ -168,29 +180,47 @@ class MainActivity : AppCompatActivity() {
     }
 
     inner class Adapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+        override fun getItemViewType(pos: Int) = if (rows[pos] is String) 0 else 1
+
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
-            val box = LinearLayout(parent.context).apply {
-                orientation = LinearLayout.VERTICAL; setPadding(40, 28, 40, 28)
-                layoutParams = RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                gravity = Gravity.CENTER_VERTICAL
+            val lp = RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            if (viewType == 0) {
+                val t = TextView(parent.context).apply {
+                    textSize = 15f; setPadding(32, 30, 32, 14); layoutParams = lp
+                    setTypeface(typeface, android.graphics.Typeface.BOLD); setTextColor(android.graphics.Color.rgb(63, 81, 181))
+                    setBackgroundColor(android.graphics.Color.rgb(240, 241, 248))
+                }
+                return object : RecyclerView.ViewHolder(t) {}
             }
-            val t = TextView(parent.context).apply { textSize = 18f }
-            val c = TextView(parent.context).apply { textSize = 14f; alpha = 0.7f }
-            box.addView(t); box.addView(c)
-            return object : RecyclerView.ViewHolder(box) {}
+            val row = LinearLayout(parent.context).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; layoutParams = lp
+            }
+            val box = LinearLayout(parent.context).apply { orientation = LinearLayout.VERTICAL; setPadding(56, 24, 16, 24) }
+            box.addView(TextView(parent.context).apply { textSize = 18f })
+            box.addView(TextView(parent.context).apply { textSize = 13f; alpha = 0.7f })
+            row.addView(box, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(TextView(parent.context).apply { text = "✎"; textSize = 22f; setPadding(36, 24, 40, 24); contentDescription = "제목·작곡가 수정" })
+            return object : RecyclerView.ViewHolder(row) {}
         }
 
         override fun onBindViewHolder(h: RecyclerView.ViewHolder, pos: Int) {
-            val s = shown[pos]; val box = h.itemView as LinearLayout
+            val item = rows[pos]
+            if (item is String) {
+                val t = h.itemView as TextView
+                t.text = (if (item in collapsed && search.text.isEmpty()) "▸ " else "▾ ") + item + "  (" + countOf(item) + ")"
+                t.setOnClickListener { if (!collapsed.remove(item)) collapsed.add(item); refresh() }
+                return
+            }
+            val s = item as Score
+            val row = h.itemView as LinearLayout; val box = row.getChildAt(0) as LinearLayout
             (box.getChildAt(0) as TextView).text = s.title
             val sum = try { PracticeStats.summary(Store.loadData(this@MainActivity, s.id)) } catch (e: Exception) { "" }
-            (box.getChildAt(1) as TextView).text = s.composer.ifEmpty { "작곡가 미지정" } + if (sum.isNotEmpty()) "   ·   $sum" else ""
-            box.setOnClickListener {
-                startActivity(Intent(this@MainActivity, ViewerActivity::class.java).putExtra("id", s.id))
-            }
+            (box.getChildAt(1) as TextView).text = sum.ifEmpty { "아직 연습 기록 없음" }
+            box.setOnClickListener { startActivity(Intent(this@MainActivity, ViewerActivity::class.java).putExtra("id", s.id)) }
             box.setOnLongClickListener { itemMenu(s); true }
+            row.getChildAt(1).setOnClickListener { editInfo(s, isNew = false) }
         }
 
-        override fun getItemCount() = shown.size
+        override fun getItemCount() = rows.size
     }
 }

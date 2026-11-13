@@ -75,8 +75,20 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         fd = ParcelFileDescriptor.open(File(Store.scoreDir(this), score.file), ParcelFileDescriptor.MODE_READ_ONLY)
         pdf = PdfRenderer(fd)
 
-        findViewById<TextView>(R.id.title).text =
-            if (score.composer.isNotEmpty()) "${score.composer} · ${score.title}" else score.title
+        val titleView = findViewById<TextView>(R.id.title)
+        val showTitle = { titleView.text = if (score.composer.isNotEmpty()) "${score.composer} · ${score.title}" else score.title }
+        showTitle()
+        titleView.setOnClickListener {   // edit title / composer
+            val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 16, 48, 0) }
+            val comp = EditText(this).apply { hint = "작곡가"; setText(score.composer) }
+            val tit = EditText(this).apply { hint = "제목"; setText(score.title) }
+            box.addView(comp); box.addView(tit)
+            AlertDialog.Builder(this).setTitle("제목·작곡가 수정").setView(box).setPositiveButton("저장") { _, _ ->
+                val lib = Store.loadLibrary(this)
+                lib.firstOrNull { it.id == score.id }?.let { it.composer = comp.text.toString().trim(); it.title = tit.text.toString().trim().ifEmpty { "제목 없음" }; score = it }
+                Store.saveLibrary(this, lib); showTitle()
+            }.setNegativeButton("취소", null).show()
+        }
         pageNo = findViewById(R.id.pageNo); btnRange = findViewById(R.id.btnRange); penBar = findViewById(R.id.penBar)
         pager = findViewById(R.id.pager)
         applyDirection()
