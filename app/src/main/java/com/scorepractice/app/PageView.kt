@@ -35,14 +35,28 @@ class PageView(context: Context, private val host: Host) : View(context) {
         fun onRangeDrawn(page: Int, x0: Float, y0: Float, x1: Float, y1: Float)
         fun onInkChanged()
         fun onZoomChanged(zoomed: Boolean)
-        fun onFixTap(page: Int, x: Float, y: Float)
+        fun onFixTap(page: Int, x: Float, y: Float, head: HeadFix.Head?, w: Int, h: Int)
     }
 
     enum class Mode { VIEW, RANGE, PEN, FIX }
 
     var page = -1
+    /** the page as rendered from the PDF; [bitmap] is that page with colour fixes applied */
+    var orig: Bitmap? = null
+        set(v) { field = v; sp = 0f; refreshFixes() }
     var bitmap: Bitmap? = null
-        set(v) { field = v; invalidate() }
+        private set
+    private var sp = 0f
+
+    fun refreshFixes() {
+        val o = orig
+        if (o == null) { bitmap = null; invalidate(); return }
+        val mine = if (host.data.showFixes) host.data.fixes.filter { it.page == page } else emptyList()
+        bitmap = if (mine.isEmpty()) o else o.copy(Bitmap.Config.ARGB_8888, true).also { bm ->
+            for (f in mine) HeadFix.apply(bm, f.x * bm.width, f.y * bm.height, f.r * bm.width, f.rb * bm.width, f.hollow, f.color)
+        }
+        invalidate()
+    }
 
     // zoom: screen = base * z + (tx, ty)
     private var z = 1f; private var tx = 0f; private var ty = 0f
@@ -58,8 +72,6 @@ class PageView(context: Context, private val host: Host) : View(context) {
     private val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
     }
-    private val fixFill = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val fixRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = Color.BLACK }
     private val cur = mutableListOf<Float>()
     private var dragStart: Pair<Float, Float>? = null
     private var dragNow: Pair<Float, Float>? = null
@@ -120,7 +132,6 @@ class PageView(context: Context, private val host: Host) : View(context) {
         layoutPage()
         c.save(); c.translate(tx, ty); c.scale(z, z)
         c.drawBitmap(b, null, dst, bmpPaint)
-        if (host.data.showFixes) for (f in host.data.fixes) if (f.page == page) drawFix(c, f)
         for (r in visibleRanges()) {
             val col = host.data.layer(r.layer)?.color ?: Color.RED
             val done = r.count >= r.target && r.target > 0
@@ -142,17 +153,6 @@ class PageView(context: Context, private val host: Host) : View(context) {
             edge.color = Color.MAGENTA; edge.strokeWidth = 4f / z
             c.drawRect(sx(minOf(a.first, e.first)), sy(minOf(a.second, e.second)), sx(maxOf(a.first, e.first)), sy(maxOf(a.second, e.second)), edge)
         }
-        c.restore()
-    }
-
-    private fun drawFix(c: Canvas, f: Fix) {
-        val w = f.r * dst.width(); val h = w * 0.78f
-        c.save(); c.rotate(-20f, sx(f.x), sy(f.y))
-        val o = RectF(sx(f.x) - w / 2, sy(f.y) - h / 2, sx(f.x) + w / 2, sy(f.y) + h / 2)
-        if (f.hollow) {
-            fixFill.color = Color.WHITE; c.drawOval(o, fixFill)
-            fixRing.strokeWidth = w * 0.16f; o.inset(w * 0.08f, w * 0.08f); c.drawOval(o, fixRing)
-        } else { fixFill.color = f.color; c.drawOval(o, fixFill) }
         c.restore()
     }
 
@@ -193,7 +193,14 @@ class PageView(context: Context, private val host: Host) : View(context) {
                     tx += e.x - lastX; ty += e.y - lastY; clamp(); invalidate()
                 }
                 lastX = e.x; lastY = e.y
-                if (am == MotionEvent.ACTION_UP && hypot(e.x - downX, e.y - downY) < 20f) host.onFixTap(page, nx(e.x), ny(e.y))
+                if (am == MotionEvent.ACTION_UP && hypot(e.x - downX, e.y - downY) < 20f) {
+                    val o = orig
+                    if (o != null) {
+                        if (sp == 0f) sp = HeadFix.staffSpace(o)
+                        val head = HeadFix.detect(o, nx(e.x) * o.width, ny(e.y) * o.height, sp)
+                        host.onFixTap(page, nx(e.x), ny(e.y), head, o.width, o.height)
+                    }
+                }
                 return true
             }
             Mode.RANGE -> {

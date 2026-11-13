@@ -44,8 +44,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private lateinit var mBeats: Button
     private val taps = mutableListOf<Long>()
     private lateinit var fixBar: View
-    private var fixColor = Color.BLACK; private var fixHollow = false
-    private var fixSize = 0.012f
+    private var fixColor = Color.BLACK
     private val fixUndo = mutableListOf<Pair<Boolean, Fix>>()   // (added?, fix)
     private val metro = Metronome { b -> onBeat(b) }
 
@@ -217,7 +216,6 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     // ---- colour corrections (for scores that are already coloured)
     private val FIX_COLORS = listOf(
         Triple("검정(색 빼기)", Color.BLACK, false),
-        Triple("빈 머리", Color.WHITE, true),
         Triple("♯ 검은건반", Color.rgb(255, 125, 125), false),
         Triple("♯ 흰건반", Color.rgb(110, 35, 160), false),
         Triple("♭ 검은건반", Color.rgb(80, 135, 255), false),
@@ -228,7 +226,6 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     private fun setupFix(id: String) {
         fixBar = findViewById(R.id.fixBar)
-        fixSize = prefs.getFloat("fixSize_$id", 0.012f)
         val row = findViewById<LinearLayout>(R.id.fixRow)
         val btns = mutableListOf<Button>()
         FIX_COLORS.forEachIndexed { i, (name, col, hollow) ->
@@ -238,7 +235,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                 setBackgroundColor(if (hollow) Color.rgb(235, 235, 235) else col)
             }
             b.setOnClickListener {
-                fixColor = col; fixHollow = hollow
+                fixColor = col
                 btns.forEachIndexed { j, o -> o.alpha = if (j == i) 1f else 0.45f }
             }
             btns.add(b); row.addView(b, 1 + i)
@@ -246,27 +243,27 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         btns.forEachIndexed { j, o -> o.alpha = if (j == 0) 1f else 0.45f }
         findViewById<Button>(R.id.btnFix).setOnClickListener {
             switchMode(if (mode == PageView.Mode.FIX) PageView.Mode.VIEW else PageView.Mode.FIX)
-            if (mode == PageView.Mode.FIX) toast("잘못 칠해진 음표: 색을 고르고 음표를 누르세요. 다시 누르면 취소")
+            if (mode == PageView.Mode.FIX) toast("색을 고르고 음표를 누르세요 (크기·빈 음표는 자동). 다시 누르면 취소")
         }
-        val resize = { f: Float -> fixSize = (fixSize * f).coerceIn(0.005f, 0.04f); prefs.edit().putFloat("fixSize_$id", fixSize).apply(); toast("크기 ${(fixSize * 1000).toInt()}") }
-        findViewById<Button>(R.id.fixSmaller).setOnClickListener { resize(0.9f) }
-        findViewById<Button>(R.id.fixBigger).setOnClickListener { resize(1.1f) }
         findViewById<Button>(R.id.fixUndo).setOnClickListener {
             val u = fixUndo.removeLastOrNull() ?: return@setOnClickListener
             if (u.first) data.fixes.remove(u.second) else data.fixes.add(u.second)
-            save(); redraw()
+            save(); refreshFixes()
         }
         findViewById<Button>(R.id.fixDone).setOnClickListener { switchMode(PageView.Mode.VIEW) }
     }
 
-    override fun onFixTap(page: Int, x: Float, y: Float) {
-        // tapping an existing patch removes it; otherwise add a patch in the chosen colour
-        val hit = data.fixes.filter { it.page == page && kotlin.math.abs(it.x - x) < it.r * 0.6f && kotlin.math.abs(it.y - y) < it.r * 0.5f }
+    override fun onFixTap(page: Int, x: Float, y: Float, head: HeadFix.Head?, w: Int, h: Int) {
+        // tapping a note that was already fixed removes that fix
+        val hit = data.fixes.filter { it.page == page && kotlin.math.abs(it.x - x) < it.r * 1.1f && kotlin.math.abs((it.y - y) * h / w) < it.rb * 1.4f }
             .minByOrNull { kotlin.math.abs(it.x - x) + kotlin.math.abs(it.y - y) }
-        if (hit != null) { data.fixes.remove(hit); fixUndo.add(false to hit) }
-        else { val f = Fix(page, x, y, fixSize, fixColor, fixHollow); data.fixes.add(f); fixUndo.add(true to f) }
-        save(); redraw()
+        if (hit != null) { data.fixes.remove(hit); fixUndo.add(false to hit); save(); refreshFixes(); return }
+        if (head == null) { toast("음표를 찾지 못했습니다. 음표 한가운데를 눌러 주세요"); return }
+        val f = Fix(page, head.x / w, head.y / h, head.a / w, fixColor, head.hollow, head.b / w)
+        data.fixes.add(f); fixUndo.add(true to f); save(); refreshFixes()
     }
+
+    private fun refreshFixes() { pages.values.forEach { it.refreshFixes() } }
 
     private fun onBeat(b: Int) {
         if (!metro.isRunning) return
@@ -356,7 +353,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         val ink = CheckBox(this).apply { text = "필기 보이기"; isChecked = data.showInk; setOnCheckedChangeListener { _, v -> data.showInk = v; save(); redraw() } }
         box.addView(ink)
         box.addView(CheckBox(this).apply { text = "색 고친 것 보이기"; isChecked = data.showFixes
-            setOnCheckedChangeListener { _, v -> data.showFixes = v; save(); redraw() } })
+            setOnCheckedChangeListener { _, v -> data.showFixes = v; save(); refreshFixes() } })
         box.addView(TextView(this).apply { text = "레이어 이름을 길게 누르면 이름 바꾸기·삭제"; alpha = 0.6f })
         val dlg = AlertDialog.Builder(this).setTitle("레이어").setView(box)
             .setPositiveButton("닫기", null)
@@ -432,8 +429,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
     private fun load(pv: PageView, page: Int) {
-        cache.get(page)?.let { pv.bitmap = it; return }
-        pv.bitmap = null
+        cache.get(page)?.let { pv.orig = it; return }
+        pv.orig = null
         val w = resources.displayMetrics.widthPixels.coerceAtLeast(1080) * 3 / 2
         exec.execute {
             val bmp = synchronized(pdf) {
@@ -444,7 +441,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                     p.render(b, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY); b
                 }
             }
-            main.post { cache.put(page, bmp); if (pv.page == page) pv.bitmap = bmp }
+            main.post { cache.put(page, bmp); if (pv.page == page) pv.orig = bmp }
         }
     }
 

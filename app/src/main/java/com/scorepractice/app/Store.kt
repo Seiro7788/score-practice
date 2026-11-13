@@ -31,7 +31,7 @@ data class Range(
 )
 
 /** colour correction on an already-coloured score: a notehead-shaped patch (normalized coords, r = width/page width) */
-data class Fix(val page: Int, val x: Float, val y: Float, val r: Float, val color: Int, val hollow: Boolean)
+data class Fix(val page: Int, val x: Float, val y: Float, val r: Float, val color: Int, val hollow: Boolean, val rb: Float = r * 0.71f)
 
 /** handwriting stroke, normalized coordinates */
 data class Stroke(val page: Int, val color: Int, val width: Float, val pts: FloatArray)
@@ -108,7 +108,8 @@ object Store {
             for (i in 0 until fa.length()) {
                 val f = fa.getJSONObject(i)
                 d.fixes.add(Fix(f.getInt("page"), f.getDouble("x").toFloat(), f.getDouble("y").toFloat(),
-                    f.getDouble("r").toFloat(), f.getInt("color"), f.optBoolean("hollow")))
+                    f.getDouble("r").toFloat(), f.getInt("color"), f.optBoolean("hollow"),
+                    f.optDouble("rb", f.getDouble("r") * 0.71).toFloat()))
             }
             d.showFixes = o.optBoolean("showFixes", true)
             d.activeLayer = o.optString("activeLayer")
@@ -142,7 +143,7 @@ object Store {
         o.put("fixes", JSONArray().apply {
             d.fixes.forEach { f ->
                 put(JSONObject().put("page", f.page).put("x", f.x.toDouble()).put("y", f.y.toDouble())
-                    .put("r", f.r.toDouble()).put("color", f.color).put("hollow", f.hollow))
+                    .put("r", f.r.toDouble()).put("rb", f.rb.toDouble()).put("color", f.color).put("hollow", f.hollow))
             }
         })
         o.put("showFixes", d.showFixes)
