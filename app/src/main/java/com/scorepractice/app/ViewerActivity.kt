@@ -80,18 +80,19 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         pageNo = findViewById(R.id.pageNo); btnRange = findViewById(R.id.btnRange); penBar = findViewById(R.id.penBar)
         pager = findViewById(R.id.pager)
         applyDirection()
+        half = prefs.getBoolean("halfPage", false)
         pager.adapter = PageAdapter()
         pager.offscreenPageLimit = 1
-        pager.setCurrentItem(data.lastPage.coerceIn(0, pdf.pageCount - 1), false)
+        pager.setCurrentItem(posOf(data.lastPage), false)
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
-                pageNo.text = "${position + 1}/${pdf.pageCount}"; data.lastPage = position; save()
-                pages.values.forEach { if (it.page != position) it.resetZoom() }
+                pageNo.text = pageLabel(position); data.lastPage = primaryPage(position); save()
+                pages.values.forEach { if (it.pos != position) it.resetZoom() }
                 pager.isUserInputEnabled = mode == PageView.Mode.VIEW
                 selectedRange = null; updatePracticeBar()
             }
         })
-        pageNo.text = "${pager.currentItem + 1}/${pdf.pageCount}"
+        pageNo.text = pageLabel(pager.currentItem)
 
         btnRange.setOnClickListener { switchMode(if (mode == PageView.Mode.RANGE) PageView.Mode.VIEW else PageView.Mode.RANGE) }
         findViewById<Button>(R.id.btnLayer).setOnClickListener { layerDialog() }
@@ -135,7 +136,9 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     }
 
     // ---- practice count buttons
-    private fun pageRanges() = data.ranges.filter { it.page == pager.currentItem && data.layer(it.layer)?.visible == true }
+    private fun pageRanges() = data.ranges.filter { r ->
+        data.layer(r.layer)?.visible == true && segsFor(pager.currentItem).any { it.page == r.page && r.y1 > it.y0 && r.y0 < it.y1 }
+    }
         .sortedWith(compareBy({ it.y0 }, { it.x0 }))
 
     private fun currentRange(): Range? {
@@ -419,16 +422,18 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     private fun menuDialog() {
         val dir = if (prefs.getBoolean("swipeRightNext", false)) "지금: 오른쪽으로 밀면 다음 쪽" else "지금: 왼쪽으로 밀면 다음 쪽"
-        AlertDialog.Builder(this).setItems(arrayOf("연습 기록", "PDF로 저장", "쪽 이동", "넘김 방향 바꾸기 ($dir)", "이 쪽 필기 모두 지우기")) { _, w ->
+        AlertDialog.Builder(this).setItems(arrayOf("연습 기록", "PDF로 저장", "쪽 이동", "넘김 방향 바꾸기 ($dir)", "이 쪽 필기 모두 지우기",
+            if (half) "반 페이지 넘김 끄기" else "반 페이지 넘김 켜기")) { _, w ->
             when (w) {
                 0 -> openRecord()
                 1 -> exportDialog()
                 2 -> { val e = EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER; hint = "1 ~ ${pdf.pageCount}" }
                     AlertDialog.Builder(this).setTitle("쪽 이동").setView(e).setPositiveButton("이동") { _, _ ->
-                        e.text.toString().toIntOrNull()?.let { pager.setCurrentItem((it - 1).coerceIn(0, pdf.pageCount - 1), false) }
+                        e.text.toString().toIntOrNull()?.let { pager.setCurrentItem(posOf(it - 1), false) }
                     }.show() }
+                5 -> setHalf(!half)
                 3 -> { prefs.edit().putBoolean("swipeRightNext", !prefs.getBoolean("swipeRightNext", false)).apply(); applyDirection() }
-                4 -> { val p = pager.currentItem
+                4 -> { val p = primaryPage(pager.currentItem)
                     AlertDialog.Builder(this).setMessage("${p + 1}쪽의 필기를 모두 지울까요?").setPositiveButton("지우기") { _, _ ->
                         data.strokes.removeAll { it.page == p }; onInkChanged() }.setNegativeButton("취소", null).show() }
             }
@@ -466,8 +471,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     private fun openRecord() {
         PracticeLog.show(this, score.title, data,
-            onJump = { r -> pager.setCurrentItem(r.page, false); selectedRange = r.id; updatePracticeBar() },
-            onEdit = { r -> pager.setCurrentItem(r.page, false); selectedRange = r.id; updatePracticeBar(); onRangeLongPress(r) })
+            onJump = { r -> pager.setCurrentItem(posOf(r.page), false); selectedRange = r.id; updatePracticeBar() },
+            onEdit = { r -> pager.setCurrentItem(posOf(r.page), false); selectedRange = r.id; updatePracticeBar(); onRangeLongPress(r) })
     }
 
     private fun rangeList() {
@@ -478,7 +483,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             "${r.page + 1}쪽  ${r.name}  [${l}]  ${r.count}/${r.target}" + if (r.count >= r.target) " ✓" else ""
         }.toTypedArray()
         AlertDialog.Builder(this).setTitle("연습 범위 (누르면 그 쪽으로)").setItems(items) { _, i ->
-            pager.setCurrentItem(rs[i].page, false)
+            pager.setCurrentItem(posOf(rs[i].page), false)
         }.setPositiveButton("닫기", null).show()
     }
 
@@ -539,9 +544,57 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     }
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
+    // ---- half-page turning: screen 0 = page 1; screen i = bottom of page i + top of page i+1; last = last page
+    private var half = false
+    private val splits = mutableMapOf<Int, Float>()
+
+    private fun n() = pdf.pageCount
+    private fun screens() = if (half && n() > 1) n() + 1 else n()
+    private fun posOf(page: Int) = page.coerceIn(0, n() - 1)   // the screen where the page (or its top half) appears
+    private fun primaryPage(pos: Int) = if (half && n() > 1) (if (pos >= n()) n() - 1 else pos) else pos
+    private fun split(p: Int) = splits[p] ?: 0.5f
+
+    private fun segsFor(pos: Int): List<PageView.Seg> =
+        if (!half || n() < 2 || pos == 0) listOf(PageView.Seg(if (half) 0 else pos, 0f, 1f))
+        else if (pos >= n()) listOf(PageView.Seg(n() - 1, 0f, 1f))
+        else listOf(PageView.Seg(pos - 1, split(pos - 1), 1f), PageView.Seg(pos, 0f, split(pos)))
+
+    private fun pageLabel(pos: Int): String =
+        if (!half || n() < 2) "${pos + 1}/${n()}"
+        else if (pos == 0) "1/${n()}" else if (pos >= n()) "${n()}/${n()}" else "${pos}½–${pos + 1}/${n()}"
+
+    private fun setHalf(on: Boolean) {
+        val page = primaryPage(pager.currentItem)
+        half = on; prefs.edit().putBoolean("halfPage", on).apply()
+        pager.adapter?.notifyDataSetChanged(); pager.setCurrentItem(posOf(page), false)
+        pageNo.text = pageLabel(pager.currentItem)
+        toast(if (on) "반 페이지 넘김: 아래 절반과 다음 쪽 위 절반을 함께 보여 줍니다" else "한 쪽씩 넘김")
+    }
+
+    /** split between two systems near the middle: the blank band closest to half height */
+    private fun findSplit(b: Bitmap): Float {
+        val w = b.width; val h = b.height; val row = IntArray(w)
+        val ink = FloatArray(h)
+        for (y in 0 until h) {
+            b.getPixels(row, 0, w, 0, y, w, 1)
+            var k = 0; var x = w / 20
+            while (x < w - w / 20) { val c = row[x]; if ((Color.red(c) * 3 + Color.green(c) * 6 + Color.blue(c)) / 10 < 170) k++; x += 2 }
+            ink[y] = k * 2f / w
+        }
+        var best = 0.5f; var bestScore = -1e9f; var y = (h * 0.3f).toInt()
+        while (y < h * 0.72f) {
+            if (ink[y] < 0.004f) {
+                val y0 = y; while (y < h && ink[y] < 0.004f) y++
+                val len = y - y0; val mid = (y0 + y) / 2f
+                val score = len - kotlin.math.abs(mid - h / 2f) * 0.25f
+                if (len > h * 0.006f && score > bestScore) { bestScore = score; best = mid / h }
+            } else y++
+        }
+        return best
+    }
+
     private fun load(pv: PageView, page: Int) {
-        cache.get(page)?.let { pv.orig = it; return }
-        pv.orig = null
+        cache.get(page)?.let { pv.setOrig(page, it); return }
         val w = resources.displayMetrics.widthPixels.coerceAtLeast(1080) * 3 / 2
         exec.execute {
             val bmp = synchronized(pdf) {
@@ -552,7 +605,16 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                     p.render(b, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY); b
                 }
             }
-            main.post { cache.put(page, bmp); if (pv.page == page) pv.orig = bmp }
+            val sp = if (splits.containsKey(page)) null else findSplit(bmp)
+            main.post {
+                cache.put(page, bmp)
+                if (sp != null) {
+                    splits[page] = sp
+                    // slices that used the default middle must be re-cut
+                    if (half) pages.values.forEach { v -> if (v.segs.any { it.page == page }) v.segs = segsFor(v.pos) }
+                }
+                if (pv.pagesShown.contains(page)) pv.setOrig(page, bmp)
+            }
         }
     }
 
@@ -567,11 +629,13 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         override fun onBindViewHolder(h: RecyclerView.ViewHolder, pos: Int) {
             val v = h.itemView as PageView
             pages.entries.removeAll { it.value === v }
-            v.page = pos; pages[pos] = v; v.resetZoom(); load(v, pos)
+            v.pos = pos; pages[pos] = v; v.resetZoom(); v.clearBitmaps()
+            v.segs = segsFor(pos)
+            for (p in v.pagesShown) load(v, p)
             if (pos == pager.currentItem) updatePracticeBar()
         }
 
-        override fun getItemCount() = pdf.pageCount
+        override fun getItemCount() = screens()
     }
 
     override fun onPause() { super.onPause(); save(); Thread { Backup.sync(applicationContext) }.start(); if (metro.isRunning) { metro.stop(); mPlay.text = "▶ 시작" } }

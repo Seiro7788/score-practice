@@ -48,22 +48,53 @@ class PageView(context: Context, private val host: Host) : View(context) {
 
     enum class Mode { VIEW, RANGE, PEN, FIX, FINGER }
 
+    /** a horizontal slice [y0, y1] (0..1) of a page; a screen shows one or more slices stacked */
+    class Seg(val page: Int, val y0: Float, val y1: Float)
+
+    var pos = -1                     // adapter position
+    var segs: List<Seg> = emptyList()
+        set(v) { field = v; refreshFixes() }
+    val pagesShown get() = segs.map { it.page }.distinct()
+    /** page currently being drawn / touched, and its full-page rect in base coords */
     var page = -1
-    /** the page as rendered from the PDF; [bitmap] is that page with colour fixes applied */
-    var orig: Bitmap? = null
-        set(v) { field = v; sp = 0f; refreshFixes() }
-    var bitmap: Bitmap? = null
         private set
-    private var sp = 0f
+    private val origs = mutableMapOf<Int, Bitmap>()     // as rendered from the PDF
+    private val shown = mutableMapOf<Int, Bitmap>()     // with colour fixes applied
+    private val sps = mutableMapOf<Int, Float>()
+
+    fun setOrig(p: Int, b: Bitmap?) {
+        if (b == null) origs.remove(p) else origs[p] = b
+        sps.remove(p); refreshFixes()
+    }
+
+    fun clearBitmaps() { origs.clear(); shown.clear(); sps.clear() }
 
     fun refreshFixes() {
-        val o = orig
-        if (o == null) { bitmap = null; invalidate(); return }
-        val mine = if (host.data.showFixes) host.data.fixes.filter { it.page == page } else emptyList()
-        bitmap = if (mine.isEmpty()) o else o.copy(Bitmap.Config.ARGB_8888, true).also { bm ->
-            for (f in mine) HeadFix.apply(bm, f.x * bm.width, f.y * bm.height, f.r * bm.width, f.rb * bm.width, f.hollow, f.color)
+        shown.clear()
+        for ((p, o) in origs) {
+            val mine = if (host.data.showFixes) host.data.fixes.filter { it.page == p } else emptyList()
+            shown[p] = if (mine.isEmpty()) o else o.copy(Bitmap.Config.ARGB_8888, true).also { bm ->
+                for (f in mine) HeadFix.apply(bm, f.x * bm.width, f.y * bm.height, f.r * bm.width, f.rb * bm.width, f.hollow, f.color)
+            }
         }
         invalidate()
+    }
+
+    private val segRects = mutableListOf<RectF>()   // visible part of each slice
+    private val pageRects = mutableListOf<RectF>()  // whole page of each slice (larger, clipped)
+    private var segY0 = 0f; private var segY1 = 1f
+    private var touchSeg = 0
+
+    private fun select(i: Int) {
+        if (i !in segs.indices || i !in pageRects.indices) return
+        page = segs[i].page; dst.set(pageRects[i]); segY0 = segs[i].y0; segY1 = segs[i].y1
+    }
+
+    private fun selectAt(screenY: Float) {
+        layoutPage(); val y = by(screenY)
+        var i = segRects.indexOfFirst { y >= it.top && y <= it.bottom }
+        if (i < 0) i = if (segRects.isNotEmpty() && y > segRects.last().bottom) segRects.size - 1 else 0
+        touchSeg = i; select(i)
     }
 
     // zoom: screen = base * z + (tx, ty)
@@ -118,8 +149,8 @@ class PageView(context: Context, private val host: Host) : View(context) {
     }
 
     private fun staffSpaceNorm(): Float {
-        val o = orig ?: return 0.0085f
-        if (sp == 0f) sp = HeadFix.staffSpace(o)
+        val o = origs[page] ?: return 0.0085f
+        val sp = sps.getOrPut(page) { HeadFix.staffSpace(o) }
         return sp / o.width
     }
 
@@ -139,9 +170,9 @@ class PageView(context: Context, private val host: Host) : View(context) {
 
     private val gd = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent) = true
-        override fun onDoubleTap(e: MotionEvent): Boolean { host.onDoubleTap(page); return true }
-        override fun onSingleTapConfirmed(e: MotionEvent): Boolean { hit(e)?.let { host.onRangeTap(it) }; return true }
-        override fun onLongPress(e: MotionEvent) { if (!multi) hit(e)?.let { host.onRangeLongPress(it) } }
+        override fun onDoubleTap(e: MotionEvent): Boolean { selectAt(e.y); host.onDoubleTap(page); return true }
+        override fun onSingleTapConfirmed(e: MotionEvent): Boolean { selectAt(e.y); hit(e)?.let { host.onRangeTap(it) }; return true }
+        override fun onLongPress(e: MotionEvent) { selectAt(e.y); if (!multi) hit(e)?.let { host.onRangeLongPress(it) } }
     })
 
     private fun clamp() {
@@ -149,18 +180,27 @@ class PageView(context: Context, private val host: Host) : View(context) {
         tx = tx.coerceIn(width - width * z, 0f); ty = ty.coerceIn(height - height * z, 0f)
     }
 
+    /** stack the slices at one common width, fitted into the view */
     private fun layoutPage() {
-        val b = bitmap ?: return
-        val s = minOf(width.toFloat() / b.width, height.toFloat() / b.height)
-        val w = b.width * s; val h = b.height * s
-        dst.set((width - w) / 2, (height - h) / 2, (width + w) / 2, (height + h) / 2)
+        segRects.clear(); pageRects.clear()
+        if (segs.isEmpty()) return
+        val ref = origs.values.firstOrNull()
+        val aspect = segs.map { (origs[it.page] ?: ref)?.let { b -> b.height.toFloat() / b.width } ?: 1.414f }
+        val total = segs.indices.sumOf { ((segs[it].y1 - segs[it].y0) * aspect[it]).toDouble() }.toFloat()
+        val w = minOf(width.toFloat(), height / total); var top = (height - total * w) / 2; val left = (width - w) / 2
+        for (i in segs.indices) {
+            val full = aspect[i] * w; val h = (segs[i].y1 - segs[i].y0) * full
+            segRects.add(RectF(left, top, left + w, top + h))
+            pageRects.add(RectF(left, top - segs[i].y0 * full, left + w, top - segs[i].y0 * full + full))
+            top += h
+        }
     }
 
     // screen -> base -> normalized page coords
     private fun bx(x: Float) = (x - tx) / z
     private fun by(y: Float) = (y - ty) / z
     private fun nx(x: Float) = ((bx(x) - dst.left) / dst.width()).coerceIn(0f, 1f)
-    private fun ny(y: Float) = ((by(y) - dst.top) / dst.height()).coerceIn(0f, 1f)
+    private fun ny(y: Float) = ((by(y) - dst.top) / dst.height()).coerceIn(segY0, segY1)
     private fun sx(x: Float) = dst.left + x * dst.width()
     private fun sy(y: Float) = dst.top + y * dst.height()
 
@@ -174,11 +214,13 @@ class PageView(context: Context, private val host: Host) : View(context) {
 
     override fun onDraw(c: Canvas) {
         super.onDraw(c)
-        val b = bitmap
         c.drawColor(Color.WHITE)
-        if (b == null) return
         layoutPage()
         c.save(); c.translate(tx, ty); c.scale(z, z)
+        for (i in segs.indices) {
+        val b = shown[segs[i].page] ?: continue
+        select(i)
+        c.save(); c.clipRect(segRects[i])
         c.drawBitmap(b, null, dst, bmpPaint)
         for (r in visibleRanges()) {
             val col = host.data.layer(r.layer)?.color ?: Color.RED
@@ -201,13 +243,18 @@ class PageView(context: Context, private val host: Host) : View(context) {
             c.drawText(g.n.toString(), sx(g.x), yb, fingerHalo); c.drawText(g.n.toString(), sx(g.x), yb, fingerPaint)
         }
         if (host.data.showInk) for (s in host.data.strokes) if (s.page == page) drawStroke(c, s.pts, s.color, s.width)
-        if (cur.size >= 2) drawStroke(c, cur.toFloatArray(), host.penColor, host.penWidth)
+        if (i == touchSeg && cur.size >= 2) drawStroke(c, cur.toFloatArray(), host.penColor, host.penWidth)
         val a = dragStart; val e = dragNow
-        if (a != null && e != null) {
+        if (i == touchSeg && a != null && e != null) {
             edge.color = Color.MAGENTA; edge.strokeWidth = 4f / z
             c.drawRect(sx(minOf(a.first, e.first)), sy(minOf(a.second, e.second)), sx(maxOf(a.first, e.first)), sy(maxOf(a.second, e.second)), edge)
         }
         c.restore()
+        if (i > 0) { edge.color = Color.rgb(150, 150, 150); edge.strokeWidth = 3f / z
+            c.drawLine(segRects[i].left, segRects[i].top, segRects[i].right, segRects[i].top, edge) }
+        }
+        c.restore()
+        select(touchSeg)
         drawFingerGuide(c)
     }
 
@@ -257,7 +304,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
     override fun onTouchEvent(e: MotionEvent): Boolean {
         scaler.onTouchEvent(e)
         val am = e.actionMasked
-        if (am == MotionEvent.ACTION_DOWN) { multi = false; lastX = e.x; lastY = e.y }
+        if (am == MotionEvent.ACTION_DOWN) { multi = false; lastX = e.x; lastY = e.y; selectAt(e.y) } else select(touchSeg)
         if (am == MotionEvent.ACTION_POINTER_DOWN) {
             if (!multi) { multiT = e.eventTime; multiZ = z; multiMoved = 0f }
             multi = true; parent?.requestDisallowInterceptTouchEvent(true)
@@ -318,9 +365,9 @@ class PageView(context: Context, private val host: Host) : View(context) {
                 }
                 lastX = e.x; lastY = e.y
                 if (am == MotionEvent.ACTION_UP && hypot(e.x - downX, e.y - downY) < 20f) {
-                    val o = orig
+                    val o = origs[page]
                     if (o != null) {
-                        if (sp == 0f) sp = HeadFix.staffSpace(o)
+                        val sp = sps.getOrPut(page) { HeadFix.staffSpace(o) }
                         val head = HeadFix.detect(o, nx(e.x) * o.width, ny(e.y) * o.height, sp)
                         host.onFixTap(page, nx(e.x), ny(e.y), head, o.width, o.height)
                     }
@@ -380,7 +427,8 @@ class PageView(context: Context, private val host: Host) : View(context) {
                     }
                     lastTapT = e.eventTime
                     val dot = floatArrayOf(cur[0], cur[1])
-                    val r = Runnable { host.data.strokes.add(Stroke(page, host.penColor, host.penWidth, dot)); host.onInkChanged() }
+                    val pg = page
+                    val r = Runnable { host.data.strokes.add(Stroke(pg, host.penColor, host.penWidth, dot)); host.onInkChanged() }
                     pendingDot = r; postDelayed(r, 350)
                 } else if (cur.size >= 4) {
                     host.data.strokes.add(Stroke(page, host.penColor, host.penWidth, cur.toFloatArray())); host.onInkChanged()
