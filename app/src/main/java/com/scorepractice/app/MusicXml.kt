@@ -7,7 +7,7 @@ import java.io.InputStream
 import java.util.zip.ZipInputStream
 
 /** a note from the MusicXML, times in quarter notes from the start of its measure */
-class XNote(val measure: Int, val onset: Double, var dur: Double, val midi: Int, val step: Char, val alter: Int, val hand: Int)
+class XNote(val measure: Int, val onset: Double, var dur: Double, val midi: Int, val step: Char, val alter: Int, var hand: Int, val part: Int = 0, val staff: Int = 1)
 
 /** one measure (index in file order) */
 class XMeasure(val number: String, var length: Double = 0.0, var forward: Boolean = false, var backward: Boolean = false,
@@ -128,7 +128,7 @@ object MusicXml {
                                     val prev = openTies[midi]
                                     if (tieStop && prev != null) { prev.dur += dur; if (!tieStart) openTies.remove(midi) }
                                     else {
-                                        val n = XNote(mi, start, dur, midi, step, alter, hand); notes.add(n)
+                                        val n = XNote(mi, start, dur, midi, step, alter, hand, part, staff); notes.add(n)
                                         if (tieStart) openTies[midi] = n
                                     }
                                 }
@@ -145,7 +145,12 @@ object MusicXml {
             }
             ev = p.next()
         }
-        // ending brackets continue over the measures between start and stop
+        // more than two piano parts (extra staves): a part belongs to the hand whose range it is closer to
+        if (part >= 2) {
+            val mean = notes.groupBy { it.part }.mapValues { (_, l) -> l.map { it.midi }.average() }
+            val rh = mean[0] ?: 66.0; val lh = mean[1] ?: 50.0
+            for (n in notes) if (n.part >= 2) { val m = mean[n.part] ?: 60.0; n.hand = if (kotlin.math.abs(m - rh) < kotlin.math.abs(m - lh)) 0 else 1 }
+        }
         return XScore(measures, notes)
     }
 
