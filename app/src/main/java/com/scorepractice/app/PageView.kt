@@ -43,6 +43,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
         fun onFingerRemove(f: Finger)
         fun onFingerMoved(f: Finger)
         fun onFingerExit()
+        fun onUndoGesture()
     }
 
     enum class Mode { VIEW, RANGE, PEN, FIX, FINGER }
@@ -83,6 +84,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
     private var dragStart: Pair<Float, Float>? = null
     private var dragNow: Pair<Float, Float>? = null
     private var multi = false            // a two-finger gesture is (or was) in progress
+    private var multiT = 0L; private var multiZ = 1f; private var multiMoved = 0f
     private var lastX = 0f; private var lastY = 0f
     // pen-mode double tap
     private var downT = 0L; private var downX = 0f; private var downY = 0f; private var lastTapT = 0L
@@ -257,6 +259,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
         val am = e.actionMasked
         if (am == MotionEvent.ACTION_DOWN) { multi = false; lastX = e.x; lastY = e.y }
         if (am == MotionEvent.ACTION_POINTER_DOWN) {
+            if (!multi) { multiT = e.eventTime; multiZ = z; multiMoved = 0f }
             multi = true; parent?.requestDisallowInterceptTouchEvent(true)
             cur.clear(); dragStart = null; dragNow = null; fStart = null; fNow = null; fDragging = false; invalidate()
         }
@@ -264,11 +267,15 @@ class PageView(context: Context, private val host: Host) : View(context) {
             // two-finger move while pinching
             if (am == MotionEvent.ACTION_MOVE && e.pointerCount > 1) {
                 val fx = (e.getX(0) + e.getX(1)) / 2; val fy = (e.getY(0) + e.getY(1)) / 2
-                if (lastX != 0f) { tx += fx - lastX; ty += fy - lastY; clamp(); invalidate() }
+                if (lastX != 0f) { multiMoved += abs(fx - lastX) + abs(fy - lastY); tx += fx - lastX; ty += fy - lastY; clamp(); invalidate() }
                 lastX = fx; lastY = fy
             }
             if (am == MotionEvent.ACTION_POINTER_UP) lastX = 0f
-            if (am == MotionEvent.ACTION_UP || am == MotionEvent.ACTION_CANCEL) multi = false
+            if (am == MotionEvent.ACTION_UP || am == MotionEvent.ACTION_CANCEL) {
+                // quick two-finger tap without zooming or moving = undo (like Ctrl+Z)
+                if (am == MotionEvent.ACTION_UP && e.eventTime - multiT < 300 && abs(z - multiZ) < 0.03f && multiMoved < 40f) host.onUndoGesture()
+                multi = false
+            }
             return true
         }
         when (host.mode) {

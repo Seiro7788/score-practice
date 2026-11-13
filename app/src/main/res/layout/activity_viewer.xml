@@ -36,12 +36,9 @@
         android:gravity="center_vertical" android:padding="4dp">
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:text="필기 중 " android:paddingStart="8dp" />
-        <Button android:id="@+id/penBlack" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="검정" />
-        <Button android:id="@+id/penRed" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="빨강" />
-        <Button android:id="@+id/penBlue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="파랑" />
-        <Button android:id="@+id/penHi" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="형광" />
+        <LinearLayout android:id="@+id/penSwatches" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" />
         <Button android:id="@+id/penErase" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="지우개" />
-        <Button android:id="@+id/penUndo" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="되돌리기" />
         <Button android:id="@+id/penDone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="완료" />
     </LinearLayout>
     </HorizontalScrollView>
@@ -52,7 +49,6 @@
         android:gravity="center_vertical" android:padding="4dp">
         <TextView android:id="@+id/fixInfo" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:text="색 고치기: 색을 고른 뒤 음표를 누르세요 " android:paddingStart="8dp" />
-        <Button android:id="@+id/fixUndo" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="되돌리기" />
         <Button android:id="@+id/fixDone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="완료" />
     </LinearLayout>
     </HorizontalScrollView>
@@ -63,15 +59,27 @@
         <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
             android:paddingStart="8dp" android:textSize="13sp"
             android:text="손번호: 넣을 곳을 누르고 밀기  →1  ↗2  가파르게↗3  ↑4  ↖5   ←완료  ↙취소\n번호 누르기=지우기, 꾹 눌러 끌기=옮기기" />
-        <Button android:id="@+id/fingerUndo" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="되돌리기" />
     </LinearLayout>
-    <androidx.viewpager2.widget.ViewPager2 android:id="@+id/pager"
-        android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+    <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+        <androidx.viewpager2.widget.ViewPager2 android:id="@+id/pager"
+            android:layout_width="match_parent" android:layout_height="match_parent" />
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_gravity="bottom|start" android:layout_margin="10dp" android:orientation="horizontal">
+            <Button android:id="@+id/undo" android:layout_width="52dp" android:layout_height="52dp"
+                android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp" android:insetTop="0dp" android:insetBottom="0dp"
+                android:text="↶" android:textSize="24sp" android:alpha="0.85" android:contentDescription="되돌리기" />
+            <Button android:id="@+id/redo" android:layout_width="52dp" android:layout_height="52dp" android:layout_marginStart="8dp"
+                android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp" android:insetTop="0dp" android:insetBottom="0dp"
+                android:text="↷" android:textSize="24sp" android:alpha="0.85" android:contentDescription="다시 하기" />
+        </LinearLayout>
+    </FrameLayout>
 
     <LinearLayout android:id="@+id/practiceBar" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:orientation="horizontal"
         android:background="#EEF6EE" android:gravity="center_vertical" android:padding="6dp"
         android:visibility="gone">
+        <Button android:id="@+id/rLog" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:minWidth="0dp" android:paddingStart="8dp" android:paddingEnd="8dp" android:text="기록" />
         <Button android:id="@+id/rPrev" android:layout_width="48dp" android:layout_height="wrap_content" android:text="◀" />
         <TextView android:id="@+id/rName" android:layout_width="0dp" android:layout_weight="1"
             android:layout_height="wrap_content" android:gravity="center" android:textSize="16sp" android:maxLines="2" />

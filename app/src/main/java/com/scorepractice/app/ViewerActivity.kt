@@ -45,9 +45,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private val taps = mutableListOf<Long>()
     private lateinit var fixBar: View
     private lateinit var fingerBar: View
-    private val fingerUndo = mutableListOf<Pair<Boolean, Finger>>()
     private var fixColor = Color.BLACK
-    private val fixUndo = mutableListOf<Pair<Boolean, Fix>>()   // (added?, fix)
     private val metro = Metronome({ b -> onBeat(b) }, { msg -> toast("메트로놈 소리를 낼 수 없습니다: $msg"); mPlay.text = "▶ 시작" })
 
     private lateinit var pdf: PdfRenderer
@@ -92,16 +90,19 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         btnRange.setOnClickListener { switchMode(if (mode == PageView.Mode.RANGE) PageView.Mode.VIEW else PageView.Mode.RANGE) }
         findViewById<Button>(R.id.btnLayer).setOnClickListener { layerDialog() }
         findViewById<Button>(R.id.btnMenu).setOnClickListener { menuDialog() }
-        findViewById<Button>(R.id.penBlack).setOnClickListener { pen(Color.BLACK, 0.003f) }
-        findViewById<Button>(R.id.penRed).setOnClickListener { pen(Color.rgb(220, 30, 30), 0.003f) }
-        findViewById<Button>(R.id.penBlue).setOnClickListener { pen(Color.rgb(30, 80, 220), 0.003f) }
-        findViewById<Button>(R.id.penHi).setOnClickListener { pen(Color.argb(90, 255, 220, 0), 0.014f) }
-        findViewById<Button>(R.id.penErase).setOnClickListener { erasing = true; toast("지우개: 지울 선을 문지르세요") }
-        findViewById<Button>(R.id.penUndo).setOnClickListener {
-            val p = pager.currentItem
-            val last = data.strokes.lastOrNull { it.page == p }
-            if (last != null) { data.strokes.remove(last); onInkChanged() }
+        val penSw = findViewById<LinearLayout>(R.id.penSwatches)
+        val pens = listOf(Color.BLACK to 0.003f, Color.rgb(220, 30, 30) to 0.003f, Color.rgb(30, 80, 220) to 0.003f,
+            Color.argb(110, 255, 220, 0) to 0.014f)
+        val penViews = mutableListOf<View>()
+        pens.forEachIndexed { i, (c, w) ->
+            val v = swatch(c, i == 0, big = w > 0.01f)
+            v.setOnClickListener { pen(c, w); penViews.forEachIndexed { j, o -> mark(o, pens[j].first, j == i) } }
+            penViews.add(v); penSw.addView(v)
         }
+        findViewById<Button>(R.id.penErase).setOnClickListener { erasing = true; toast("지우개: 지울 선을 문지르세요") }
+        findViewById<Button>(R.id.undo).setOnClickListener { undo() }
+        findViewById<Button>(R.id.redo).setOnClickListener { redo() }
+        lastJson = snapshot()
         findViewById<Button>(R.id.penDone).setOnClickListener { switchMode(PageView.Mode.VIEW) }
         setupPractice(); setupMetronome(id); setupFix(id); setupFinger()
     }
@@ -167,7 +168,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         }
         findViewById<Button>(R.id.rPrev).setOnClickListener { step(-1) }
         findViewById<Button>(R.id.rNext).setOnClickListener { step(1) }
-        rName.setOnClickListener { currentRange()?.let { onRangeLongPress(it) } }
+        rName.setOnClickListener { openRecord() }
+        findViewById<Button>(R.id.rLog).setOnClickListener { openRecord() }
     }
 
     // ---- metronome
@@ -230,28 +232,18 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private fun setupFix(id: String) {
         fixBar = findViewById(R.id.fixBar)
         val row = findViewById<LinearLayout>(R.id.fixRow)
-        val btns = mutableListOf<Button>()
-        FIX_COLORS.forEachIndexed { i, (name, col, hollow) ->
-            val b = Button(this).apply {
-                text = name; textSize = 12f; isAllCaps = false
-                setTextColor(if (hollow) Color.BLACK else Color.WHITE)
-                setBackgroundColor(if (hollow) Color.rgb(235, 235, 235) else col)
-            }
+        val btns = mutableListOf<View>()
+        FIX_COLORS.forEachIndexed { i, (_, col, _) ->
+            val b = swatch(col, i == 0)
             b.setOnClickListener {
                 fixColor = col
-                btns.forEachIndexed { j, o -> o.alpha = if (j == i) 1f else 0.45f }
+                btns.forEachIndexed { j, o -> mark(o, FIX_COLORS[j].second, j == i) }
             }
             btns.add(b); row.addView(b, 1 + i)
         }
-        btns.forEachIndexed { j, o -> o.alpha = if (j == 0) 1f else 0.45f }
         findViewById<Button>(R.id.btnFix).setOnClickListener {
             switchMode(if (mode == PageView.Mode.FIX) PageView.Mode.VIEW else PageView.Mode.FIX)
             if (mode == PageView.Mode.FIX) toast("색을 고르고 음표를 누르세요 (크기·빈 음표는 자동). 다시 누르면 취소")
-        }
-        findViewById<Button>(R.id.fixUndo).setOnClickListener {
-            val u = fixUndo.removeLastOrNull() ?: return@setOnClickListener
-            if (u.first) data.fixes.remove(u.second) else data.fixes.add(u.second)
-            save(); refreshFixes()
         }
         findViewById<Button>(R.id.fixDone).setOnClickListener { switchMode(PageView.Mode.VIEW) }
     }
@@ -260,10 +252,10 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         // tapping a note that was already fixed removes that fix
         val hit = data.fixes.filter { it.page == page && kotlin.math.abs(it.x - x) < it.r * 1.1f && kotlin.math.abs((it.y - y) * h / w) < it.rb * 1.4f }
             .minByOrNull { kotlin.math.abs(it.x - x) + kotlin.math.abs(it.y - y) }
-        if (hit != null) { data.fixes.remove(hit); fixUndo.add(false to hit); save(); refreshFixes(); return }
+        if (hit != null) { data.fixes.remove(hit); save(); refreshFixes(); return }
         if (head == null) { toast("음표를 찾지 못했습니다. 음표 한가운데를 눌러 주세요"); return }
         val f = Fix(page, head.x / w, head.y / h, head.a / w, fixColor, head.hollow, head.b / w)
-        data.fixes.add(f); fixUndo.add(true to f); save(); refreshFixes()
+        data.fixes.add(f); save(); refreshFixes()
     }
 
     // ---- fingering numbers
@@ -273,15 +265,10 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             switchMode(if (mode == PageView.Mode.FINGER) PageView.Mode.VIEW else PageView.Mode.FINGER)
             if (mode == PageView.Mode.FINGER && !data.showFingers) { data.showFingers = true; save() }
         }
-        findViewById<Button>(R.id.fingerUndo).setOnClickListener {
-            val u = fingerUndo.removeLastOrNull() ?: return@setOnClickListener
-            if (u.first) data.fingers.remove(u.second) else data.fingers.add(u.second)
-            save(); redraw()
-        }
     }
 
-    override fun onFingerAdd(f: Finger) { data.fingers.add(f); fingerUndo.add(true to f); save(); redraw() }
-    override fun onFingerRemove(f: Finger) { data.fingers.remove(f); fingerUndo.add(false to f); save(); redraw() }
+    override fun onFingerAdd(f: Finger) { data.fingers.add(f); save(); redraw() }
+    override fun onFingerRemove(f: Finger) { data.fingers.remove(f); save(); redraw() }
     override fun onFingerMoved(f: Finger) { save(); redraw() }
     override fun onFingerExit() { switchMode(PageView.Mode.VIEW); toast("손번호 입력 끝") }
 
@@ -420,9 +407,9 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     private fun menuDialog() {
         val dir = if (prefs.getBoolean("swipeRightNext", false)) "지금: 오른쪽으로 밀면 다음 쪽" else "지금: 왼쪽으로 밀면 다음 쪽"
-        AlertDialog.Builder(this).setItems(arrayOf("연습 범위 목록", "쪽 이동", "넘김 방향 바꾸기 ($dir)", "이 쪽 필기 모두 지우기")) { _, w ->
+        AlertDialog.Builder(this).setItems(arrayOf("연습 기록", "쪽 이동", "넘김 방향 바꾸기 ($dir)", "이 쪽 필기 모두 지우기")) { _, w ->
             when (w) {
-                0 -> rangeList()
+                0 -> openRecord()
                 1 -> { val e = EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER; hint = "1 ~ ${pdf.pageCount}" }
                     AlertDialog.Builder(this).setTitle("쪽 이동").setView(e).setPositiveButton("이동") { _, _ ->
                         e.text.toString().toIntOrNull()?.let { pager.setCurrentItem((it - 1).coerceIn(0, pdf.pageCount - 1), false) }
@@ -433,6 +420,12 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                         data.strokes.removeAll { it.page == p }; onInkChanged() }.setNegativeButton("취소", null).show() }
             }
         }.show()
+    }
+
+    private fun openRecord() {
+        PracticeLog.show(this, score.title, data,
+            onJump = { r -> pager.setCurrentItem(r.page, false); selectedRange = r.id; updatePracticeBar() },
+            onEdit = { r -> pager.setCurrentItem(r.page, false); selectedRange = r.id; updatePracticeBar(); onRangeLongPress(r) })
     }
 
     private fun rangeList() {
@@ -449,7 +442,59 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     // ---- pages
     private fun redraw() { pages.values.forEach { it.invalidate() } }
-    private fun save() = Store.saveData(this, score.id, data)
+    // ---- undo / redo for every change (like Ctrl+Z): whole-score snapshots
+    private var lastJson = ""
+    private val undoStack = ArrayDeque<String>()
+    private val redoStack = ArrayDeque<String>()
+
+    /** snapshot without view-only state (page, visibility toggles don't count as edits) */
+    private fun snapshot(): String = Store.toJson(data).apply { remove("lastPage") }.toString()
+
+    private fun save() {
+        val now = snapshot()
+        if (lastJson.isNotEmpty() && now != lastJson) {
+            undoStack.addLast(lastJson); if (undoStack.size > 100) undoStack.removeFirst(); redoStack.clear()
+        }
+        lastJson = now
+        Store.saveData(this, score.id, data)
+    }
+
+    private fun restore(json: String) {
+        val page = data.lastPage
+        data = Store.parse(json); data.lastPage = page; lastJson = json
+        Store.saveData(this, score.id, data)
+        refreshFixes(); updatePracticeBar(); redraw()
+    }
+
+    private fun undo() {
+        val prev = undoStack.removeLastOrNull() ?: run { toast("되돌릴 것이 없습니다"); return }
+        redoStack.addLast(lastJson); restore(prev)
+    }
+
+    private fun redo() {
+        val next = redoStack.removeLastOrNull() ?: run { toast("다시 할 것이 없습니다"); return }
+        undoStack.addLast(lastJson); restore(next)
+    }
+
+    override fun onUndoGesture() = undo()
+
+    // ---- colour swatches (show the colour itself, not its name)
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    private fun swatch(color: Int, selected: Boolean, big: Boolean = false): View {
+        val v = View(this)
+        v.layoutParams = LinearLayout.LayoutParams(dp(if (big) 44 else 38), dp(38)).apply { setMargins(dp(5), dp(2), dp(5), dp(2)) }
+        mark(v, color, selected); return v
+    }
+
+    private fun mark(v: View, color: Int, selected: Boolean) {
+        v.background = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(color)
+            setStroke(dp(if (selected) 4 else 1), if (selected) Color.rgb(40, 40, 40) else Color.rgb(170, 170, 170))
+        }
+        v.scaleX = if (selected) 1.15f else 1f; v.scaleY = v.scaleX
+    }
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
     private fun load(pv: PageView, page: Int) {

@@ -122,7 +122,8 @@ class MainActivity : AppCompatActivity() {
         override fun onBindViewHolder(h: RecyclerView.ViewHolder, pos: Int) {
             val s = shown[pos]; val box = h.itemView as LinearLayout
             (box.getChildAt(0) as TextView).text = s.title
-            (box.getChildAt(1) as TextView).text = s.composer.ifEmpty { "작곡가 미지정" }
+            val sum = try { PracticeStats.summary(Store.loadData(this@MainActivity, s.id)) } catch (e: Exception) { "" }
+            (box.getChildAt(1) as TextView).text = s.composer.ifEmpty { "작곡가 미지정" } + if (sum.isNotEmpty()) "   ·   $sum" else ""
             box.setOnClickListener {
                 startActivity(Intent(this@MainActivity, ViewerActivity::class.java).putExtra("id", s.id))
             }

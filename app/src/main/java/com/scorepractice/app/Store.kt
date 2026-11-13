@@ -86,9 +86,14 @@ object Store {
     }
 
     fun loadData(c: Context, id: String): ScoreData {
-        val d = ScoreData(); val f = dataFile(c, id)
-        if (f.exists()) {
-            val o = JSONObject(f.readText())
+        val f = dataFile(c, id)
+        return parse(if (f.exists()) f.readText() else null)
+    }
+
+    fun parse(text: String?): ScoreData {
+        val d = ScoreData()
+        if (text != null) {
+            val o = JSONObject(text)
             val la = o.optJSONArray("layers") ?: JSONArray()
             for (i in 0 until la.length()) {
                 val l = la.getJSONObject(i)
@@ -133,7 +138,11 @@ object Store {
         return d
     }
 
-    fun saveData(c: Context, id: String, d: ScoreData) {
+    fun saveData(c: Context, id: String, d: ScoreData) = writeText(c, id, toJson(d).toString())
+
+    fun writeText(c: Context, id: String, text: String) = writeSafe(dataFile(c, id), text)
+
+    fun toJson(d: ScoreData): JSONObject {
         val o = JSONObject()
         o.put("layers", JSONArray().apply {
             d.layers.forEach { put(JSONObject().put("id", it.id).put("name", it.name).put("color", it.color).put("visible", it.visible)) }
@@ -167,7 +176,7 @@ object Store {
         })
         o.put("showFingers", d.showFingers)
         o.put("activeLayer", d.activeLayer).put("showInk", d.showInk).put("lastPage", d.lastPage)
-        writeSafe(dataFile(c, id), o.toString())
+        return o
     }
 
     fun deleteScore(c: Context, s: Score) {
