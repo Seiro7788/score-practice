@@ -2,6 +2,8 @@ name: Build APK
 on:
   push:
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,7 +18,18 @@ jobs:
           gradle-version: "8.7"
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
+      - name: Rename
+        run: cp app/build/outputs/apk/debug/app-debug.apk ScorePractice.apk
       - uses: actions/upload-artifact@v4
         with:
           name: ScorePractice-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: ScorePractice.apk
+      # phone-friendly download: always the newest build under Releases
+      - uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: latest
+          name: 최신 빌드
+          body: 휴대폰에서 ScorePractice.apk 를 눌러 받아 설치하세요.
+          make_latest: true
+          files: ScorePractice.apk
