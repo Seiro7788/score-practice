@@ -392,6 +392,10 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         }
         val hands = arrayOf("오른손", "왼손", "양손"); val sounds = arrayOf("피아노", "계이름", "계이름+피아노")
         row1.addView(small(Button(this).apply {
+            text = "악보 보기"; setTextColor(Color.rgb(63, 81, 181))
+            setOnClickListener { stopPlay(); startActivity(android.content.Intent(this@ViewerActivity, XmlViewActivity::class.java).putExtra("id", score.id)) }
+        }))
+        row1.addView(small(Button(this).apply {
             text = hands[data.playHands]
             setOnClickListener { data.playHands = (data.playHands + 1) % 3; text = hands[data.playHands]; Store.saveData(this@ViewerActivity, score.id, data) }
         }))
@@ -421,7 +425,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                         if (sound != 1) { val f = File(cacheDir, "play.mid"); MidiPlayer.write(tl, f); files.add(f) }
                         if (sound != 0) {
                             val f = File(cacheDir, "sing.wav")
-                            if (Singer.render(this, Timeline.melody(tl), f)) files.add(f)
+                            if (Singer.render(this, Timeline.melody(tl), f, score.composer)) files.add(f)
                         }
                         main.post {
                             stopPlay()

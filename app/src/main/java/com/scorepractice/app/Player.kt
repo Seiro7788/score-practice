@@ -8,19 +8,30 @@ import java.io.File
 /** what to play from the MusicXML */
 class PlayChoice(var hands: Int = 2,          // 0 = right, 1 = left, 2 = both
                  var from: Int = 0, var to: Int = 0,   // printed measure numbers, 0 = whole piece
-                 var loop: Boolean = false)
+                 var loop: Boolean = false,
+                 var fromIdx: Int = -1, var toIdx: Int = -1)   // measure indices in the file (tapped on the score view)
 
 /** an event on the play timeline (seconds) */
 class TNote(val t: Double, val d: Double, val midi: Int, val step: Char, val hand: Int)
 
 object Timeline {
     /** notes in play order, in seconds at the given tempo (quarter = bpm) */
-    fun build(sc: XScore, ch: PlayChoice, bpm: Int): List<TNote> {
-        val order = if (ch.from > 0 || ch.to > 0) {
+    fun order(sc: XScore, ch: PlayChoice): List<Int> =
+        if (ch.fromIdx >= 0) (ch.fromIdx..(if (ch.toIdx >= ch.fromIdx) ch.toIdx else sc.measures.size - 1)).toList()
+        else if (ch.from > 0 || ch.to > 0) {
             val a = if (ch.from > 0) sc.indexOf(ch.from).coerceAtLeast(0) else 0
             val b = if (ch.to > 0) sc.indexOf(ch.to).let { if (it < 0) sc.measures.size - 1 else it } else sc.measures.size - 1
             (a..maxOf(a, b)).toList()
         } else sc.order()
+
+    /** (measure index, start second) for following the music on the score */
+    fun measureTimes(sc: XScore, ch: PlayChoice, bpm: Int): List<Pair<Int, Double>> {
+        var t = 0.0; val spq = 60.0 / bpm
+        return order(sc, ch).map { mi -> (mi to t).also { t += sc.measures[mi].length * spq } }
+    }
+
+    fun build(sc: XScore, ch: PlayChoice, bpm: Int): List<TNote> {
+        val order = order(sc, ch)
         val byMeasure = sc.notes.groupBy { it.measure }
         val spq = 60.0 / bpm; val out = mutableListOf<TNote>(); var t0 = 0.0
         for (mi in order) {

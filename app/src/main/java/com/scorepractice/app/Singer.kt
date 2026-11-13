@@ -1,14 +1,8 @@
 package com.scorepractice.app
 
 import android.content.Context
-import android.os.Bundle
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import java.io.File
 import java.io.RandomAccessFile
-import java.util.Locale
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.exp
@@ -16,138 +10,143 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
- * Sings the melody with note names (도 레 미 파 솔 라 시, fixed do: C = 도).
- * The phone's Korean voice says each syllable once; the sound is then tuned to every note's pitch
- * and stretched to its length. Without a Korean voice a plain "아" tone is used.
+ * Sings the melody with note names, made by a small voice synthesizer:
+ * every note is generated directly at its exact pitch (no re-tuning of recorded speech),
+ * and held smoothly for its whole length (no looping).
+ * Syllables in Italian: do re mi fa sol la si (fixed do: C = do), clear machine voice.
+ * Rules: soprano lines in a female voice, low lines in a male voice; the voice never changes inside a phrase;
+ * notes too high/low to sing move by whole octaves for a whole phrase (not note by note); legato, no gaps.
+ * Bach and Scarlatti keep their written octaves.
  */
 object Singer {
-    private val SYL = mapOf('C' to "도", 'D' to "레", 'E' to "미", 'F' to "파", 'G' to "솔", 'A' to "라", 'B' to "시")
     private const val RATE = 22050
 
-    class Sample(val pcm: FloatArray, val rate: Int, val f0: Double)
+    /** vowel formants (Hz) and bandwidths, mid voice */
+    private class Vowel(val f: DoubleArray, val b: DoubleArray = doubleArrayOf(90.0, 110.0, 160.0), val a: DoubleArray = doubleArrayOf(1.0, 0.6, 0.25))
+    private val A = Vowel(doubleArrayOf(750.0, 1250.0, 2700.0))
+    private val E = Vowel(doubleArrayOf(480.0, 1900.0, 2600.0))
+    private val I = Vowel(doubleArrayOf(300.0, 2300.0, 3000.0))
+    private val O = Vowel(doubleArrayOf(450.0, 800.0, 2830.0))
+    private val U = Vowel(doubleArrayOf(330.0, 900.0, 2400.0))
+    private val L = Vowel(doubleArrayOf(350.0, 1000.0, 2500.0))   // l / r colour
+    private val M = Vowel(doubleArrayOf(250.0, 1200.0, 2500.0), a = doubleArrayOf(1.0, 0.08, 0.03))   // nasal hum
 
-    private var cache: Map<Char, Sample>? = null
+    /** consonant kinds at the start of a syllable */
+    private enum class C { NONE, D, R, M, P, S, SH, F, G, B, L }
+    private class Syl(val c: C, val v: Vowel, val end: Vowel? = null, val pre: Vowel? = null)
 
-    /** make the seven syllables with text-to-speech (blocks; call off the main thread) */
-    fun prepare(c: Context): Map<Char, Sample>? {
-        cache?.let { return it }
-        val dir = File(c.cacheDir, "syl").apply { mkdirs() }
-        val ready = CountDownLatch(1); var ok = false
-        var tts: TextToSpeech? = null
-        tts = TextToSpeech(c.applicationContext) { st ->
-            ok = st == TextToSpeech.SUCCESS && tts!!.setLanguage(Locale.KOREAN) >= TextToSpeech.LANG_AVAILABLE
-            ready.countDown()
-        }
-        ready.await(8, TimeUnit.SECONDS)
-        val t = tts ?: return null
-        if (!ok) { t.shutdown(); return null }
-        val done = CountDownLatch(SYL.size)
-        t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(id: String?) {}
-            override fun onDone(id: String?) { done.countDown() }
-            @Deprecated("Deprecated in Java") override fun onError(id: String?) { done.countDown() }
-        })
-        t.setSpeechRate(1.1f)
-        for ((k, s) in SYL) t.synthesizeToFile(s, Bundle(), File(dir, "$k.wav"), "syl$k")
-        done.await(20, TimeUnit.SECONDS); t.shutdown()
-        val out = mutableMapOf<Char, Sample>()
-        for (k in SYL.keys) readWav(File(dir, "$k.wav"))?.let { (pcm, rate) -> trim(pcm)?.let { out[k] = Sample(it, rate, pitchOf(it, rate)) } }
-        return if (out.size == SYL.size) out.also { cache = it } else null
+    private fun syllable(step: Char): Syl = when (step) {   // do re mi fa sol la si
+        'C' -> Syl(C.D, O); 'D' -> Syl(C.R, E); 'E' -> Syl(C.M, I); 'F' -> Syl(C.F, A)
+        'G' -> Syl(C.S, O, end = L); 'A' -> Syl(C.L, A); else -> Syl(C.S, I)
     }
 
-    private fun readWav(f: File): Pair<FloatArray, Int>? {
-        if (!f.exists() || f.length() < 100) return null
-        val b = f.readBytes()
-        fun u16(i: Int) = (b[i].toInt() and 0xff) or ((b[i + 1].toInt() and 0xff) shl 8)
-        fun u32(i: Int) = u16(i) or (u16(i + 2) shl 16)
-        var i = 12; var rate = 22050; var ch = 1; var bits = 16
-        while (i + 8 <= b.size) {
-            val id = String(b, i, 4); val len = u32(i + 4)
-            if (id == "fmt ") { ch = u16(i + 10); rate = u32(i + 12); bits = u16(i + 22) }
-            if (id == "data") {
-                if (bits != 16) return null
-                val n = min(len, b.size - i - 8) / (2 * ch)
-                return FloatArray(n) { k -> val o = i + 8 + k * 2 * ch; (u16(o).toShort()).toFloat() / 32768f } to rate
-            }
-            i += 8 + len + (len and 1)
-        }
-        return null
+    /** female voice: formants about 17 % higher */
+    private fun voiced(v: Vowel, female: Boolean) = if (!female) v else Vowel(DoubleArray(3) { v.f[it] * 1.17 }, v.b, v.a)
+
+    /** spectral envelope of a vowel at frequency f */
+    private fun env(v: Vowel, f: Double): Double {
+        var s = 0.0
+        for (i in 0..2) { val x = (f - v.f[i]) / (v.b[i] / 2); s += v.a[i] / sqrt(1 + x * x) }
+        return s
     }
 
-    private fun trim(x: FloatArray): FloatArray? {
-        val th = (x.maxOfOrNull { abs(it) } ?: 0f) * 0.06f
-        val a = x.indexOfFirst { abs(it) > th }; val b = x.indexOfLast { abs(it) > th }
-        return if (a < 0 || b <= a) null else x.copyOfRange(a, b + 1)
-    }
+    private fun mix(a: Vowel, b: Vowel, t: Double) = Vowel(DoubleArray(3) { a.f[it] + (b.f[it] - a.f[it]) * t },
+        DoubleArray(3) { a.b[it] + (b.b[it] - a.b[it]) * t }, DoubleArray(3) { a.a[it] + (b.a[it] - a.a[it]) * t })
 
-    /** fundamental of the vowel (middle part), by autocorrelation in 70..450 Hz */
-    private fun pitchOf(x: FloatArray, rate: Int): Double {
-        val n = min(x.size / 3, (rate * 0.05).toInt()); val s = x.size / 2 - n / 2
-        if (n < 100 || s < 0) return 200.0
-        var bestLag = 0; var best = 0.0
-        for (lag in rate / 450..rate / 70) {
-            var c = 0.0; for (i in 0 until n - lag) c += x[s + i] * x[s + i + lag]
-            if (c > best) { best = c; bestLag = lag }
-        }
-        return if (bestLag > 0) rate.toDouble() / bestLag else 200.0
-    }
+    private val rnd = java.util.Random(7)
 
-    /** resample (tunes the pitch), then fit to the note's length by looping the vowel */
-    private fun note(sm: Sample, f: Double, len: Int): FloatArray {
-        val r = f / sm.f0 * sm.rate / RATE
-        val tuned = FloatArray(max(1, (sm.pcm.size / r).toInt())) { i ->
-            val p = i * r; val k = p.toInt(); val fr = (p - k).toFloat()
-            if (k + 1 < sm.pcm.size) sm.pcm[k] * (1 - fr) + sm.pcm[k + 1] * fr else 0f
-        }
+    /** one sung note: consonant, then the vowel held at pitch f for len samples */
+    private fun sing(step: Char, f: Double, len: Int, female: Boolean): FloatArray {
+        val s0 = syllable(step)
+        val sy = Syl(s0.c, voiced(s0.v, female), s0.end?.let { voiced(it, female) })
         val out = FloatArray(len)
-        if (tuned.size >= len) System.arraycopy(tuned, 0, out, 0, len)
-        else {
-            // keep the consonant + vowel, then hold the vowel: loop one stretch of it with cross-fades
-            val loopLen = max(64, (RATE * 0.06).toInt()); val ls = max(0, tuned.size - loopLen - (RATE * 0.03).toInt())
-            System.arraycopy(tuned, 0, out, 0, tuned.size)
-            var pos = ls + loopLen; val xf = loopLen / 4
-            while (pos < len) {
-                for (i in 0 until loopLen) {
-                    if (pos + i >= len) break
-                    val v = tuned[min(tuned.size - 1, ls + i)]
-                    if (i < xf && pos + i < tuned.size + loopLen) out[pos + i] = out[pos + i] * (1 - i.toFloat() / xf) + v * (i.toFloat() / xf)
-                    else out[pos + i] = v
-                }
-                pos += loopLen - xf
+        val cons = when (sy.c) { C.NONE -> 0; C.D, C.G, C.B -> (0.018 * RATE).toInt(); C.P -> (0.03 * RATE).toInt()
+            C.S, C.SH, C.F -> (0.07 * RATE).toInt(); C.R -> (0.035 * RATE).toInt(); C.M, C.L -> (0.06 * RATE).toInt() }
+        val c0 = min(cons, len / 3)
+        // noise part of s / sh / p / f (before the voice starts)
+        if (sy.c == C.S || sy.c == C.SH || sy.c == C.P || sy.c == C.F) {
+            var lp = 0.0; var prev = 0.0
+            for (i in 0 until c0) {
+                val n = rnd.nextGaussian()
+                val hp = n - prev; prev = n                    // brighten
+                lp += (hp - lp) * (if (sy.c == C.S) 0.9 else if (sy.c == C.SH) 0.55 else 0.35)
+                val e = sin(PI * i / c0)
+                out[i] = (lp * e * (if (sy.c == C.P) 0.25 else 0.12)).toFloat()
             }
         }
-        val fade = min(len / 3, (RATE * 0.025).toInt())   // soft end
-        for (i in 0 until fade) out[len - 1 - i] *= i.toFloat() / fade
+        // voiced part: additive harmonics shaped by the (moving) vowel envelope
+        val vStart = if (sy.c == C.M || sy.c == C.L || sy.c == C.R) 0 else c0
+        val nh = max(1, (4500 / f).toInt())
+        val ph = DoubleArray(nh)
+        var vib = 0.0
+        val att = (0.025 * RATE).toInt(); val rel = min(len / 4, (0.06 * RATE).toInt())
+        var i = vStart
+        while (i < len) {
+            val t = (i - vStart).toDouble() / RATE
+            // vowel colour over time: m / l / r glide into the vowel, l at the end of 솔
+            val v = when {
+                sy.c == C.M && i < c0 -> M
+                (sy.c == C.L || sy.c == C.R) && i < c0 -> mix(voiced(L, female), sy.v, (i.toDouble() / c0).pow(2))
+                sy.end != null && i > len * 0.72 -> mix(sy.v, sy.end, min(1.0, (i - len * 0.72) / (len * 0.2)))
+                else -> sy.v
+            }
+            // gentle vibrato after the start of long notes
+            val depth = if (t > 0.25) min(0.006, (t - 0.25) * 0.02) else 0.0
+            vib += 2 * PI * 5.2 / RATE
+            val ff = f * (1 + depth * sin(vib))
+            var s = 0.0
+            for (k in 1..nh) {
+                val fk = ff * k; if (fk > 5000) break
+                ph[k - 1] += 2 * PI * fk / RATE
+                s += sin(ph[k - 1]) * env(v, fk) / k.toDouble().pow(0.9)
+            }
+            // envelope: soft attack (d/g/b: quicker), release at the end, r = brief dip (tap)
+            var e = min(1.0, (i - vStart + 1).toDouble() / (if (sy.c == C.D || sy.c == C.G || sy.c == C.B) att / 3 else att))
+            if (sy.c == C.R && i < c0) e *= 0.35
+            if (sy.c == C.M && i < c0) e *= 0.55
+            if (i > len - rel) e *= (len - i).toDouble() / rel
+            out[i] += (s * e * 0.22).toFloat()
+            i++
+        }
         return out
     }
 
-    /** plain sung "아" when no voice is available */
-    private fun tone(f: Double, len: Int): FloatArray = FloatArray(len) { i ->
-        val t = i.toDouble() / RATE; val vib = 1 + 0.006 * sin(2 * PI * 5.5 * t)
-        val env = min(1.0, t / 0.03) * min(1.0, (len - i).toDouble() / (RATE * 0.03))
-        (env * (0.6 * sin(2 * PI * f * vib * t) + 0.25 * sin(4 * PI * f * vib * t) + 0.12 * sin(6 * PI * f * vib * t))).toFloat()
+    /** phrases = runs of notes without a rest between them */
+    private fun phrases(m: List<TNote>): List<List<TNote>> {
+        val out = mutableListOf<MutableList<TNote>>()
+        for (n in m) {
+            val last = out.lastOrNull()?.last()
+            if (last == null || n.t - (last.t + last.d) > 0.08) out.add(mutableListOf(n)) else out.last().add(n)
+        }
+        return out
     }
 
     /** render the melody to a WAV file; returns false if nothing to sing */
-    fun render(c: Context, melody: List<TNote>, out: File): Boolean {
+    fun render(c: Context, melody: List<TNote>, out: File, composer: String = ""): Boolean {
         if (melody.isEmpty()) return false
-        val sm = prepare(c)
-        val total = ((melody.last().t + melody.last().d + 0.5) * RATE).toInt()
-        val mix = FloatArray(total)
-        for (n in melody) {
-            var f = 440.0 * 2.0.pow((n.midi - 69) / 12.0)
-            val s = sm?.get(n.step)
-            // keep the voice in a natural range (an octave up/down does not change the note name)
-            val base = s?.f0 ?: 220.0
-            while (f > base * 1.7) f /= 2; while (f < base * 0.62) f *= 2
-            val len = max(1, (n.d * RATE).toInt()); val a = (n.t * RATE).toInt()
-            val v = if (s != null) note(s, f, len) else tone(f, len)
-            for (i in v.indices) if (a + i < total) mix[a + i] += v[i]
+        val keepOctave = Regex("바흐|bach|스칼라티|scarlatti", RegexOption.IGNORE_CASE).containsMatchIn(composer)
+        val total = ((melody.last().t + melody.last().d + 0.4) * RATE).toInt()
+        val mixb = FloatArray(total)
+        for (ph in phrases(melody)) {
+            val mids = ph.map { it.midi }.sorted(); val med = mids[mids.size / 2]
+            val female = med >= 60                                     // one voice for the whole phrase
+            val lo = if (female) 60 else 43; val hi = if (female) 81 else 65
+            // whole-octave shift for the phrase that puts most notes in the voice's range
+            val shift = if (keepOctave) 0 else listOf(0, -12, 12, -24, 24).maxByOrNull { s -> ph.count { it.midi + s in lo..hi } * 10 - abs(s) / 12 } ?: 0
+            for ((k, n) in ph.withIndex()) {
+                val f = 440.0 * 2.0.pow((n.midi + shift - 69) / 12.0)
+                // legato: hold until the next note of the phrase starts (small overlap for a smooth join)
+                val endT = if (k + 1 < ph.size) ph[k + 1].t + 0.015 else n.t + n.d
+                val len = max(1, ((endT - n.t) * RATE).toInt()); val a = (n.t * RATE).toInt()
+                val v = sing(n.step, f, len, female)
+                for (i in v.indices) if (a + i < total) mixb[a + i] += v[i]
+            }
         }
-        val peak = max(1e-6f, mix.maxOf { abs(it) }); val g = 0.85f / peak
-        writeWav(out, FloatArray(total) { mix[it] * g })
+        val peak = max(1e-6f, mixb.maxOf { abs(it) }); val g = 0.85f / peak
+        writeWav(out, FloatArray(total) { mixb[it] * g })
         return true
     }
 

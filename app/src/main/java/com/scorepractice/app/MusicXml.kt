@@ -38,6 +38,12 @@ class XScore(val measures: List<XMeasure>, val notes: List<XNote>) {
 }
 
 object MusicXml {
+    /** the XML text (compressed .mxl unpacked), for drawing the score */
+    fun text(f: File): String = f.inputStream().use { inp ->
+        val bi = inp.buffered(); val head = ByteArray(2); bi.mark(4); bi.read(head); bi.reset()
+        (if (head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte()) unzipRoot(bi) else bi).readBytes().toString(Charsets.UTF_8)
+    }
+
     /** .musicxml / .xml, or compressed .mxl (zip) */
     fun load(f: File): XScore = f.inputStream().use { inp ->
         val head = ByteArray(2); val bi = inp.buffered(); bi.mark(4); bi.read(head); bi.reset()

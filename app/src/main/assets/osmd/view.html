@@ -1,0 +1,93 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<style>
+  body { margin: 0; background: #fff; font-family: sans-serif; }
+  #osmd { position: relative; }
+  .box { position: absolute; pointer-events: none; border-radius: 4px; }
+  .play { background: rgba(80,135,255,.20); border: 2px solid rgba(80,135,255,.85); }
+  .from { background: rgba(70,190,100,.18); border: 2px solid rgba(70,190,100,.9); }
+  .to { background: rgba(255,125,125,.18); border: 2px solid rgba(255,125,125,.9); }
+  #msg { padding: 40px 16px; color: #666; }
+</style></head>
+<body>
+<div id="msg">악보를 그리는 중…</div>
+<div id="osmd"></div>
+<script src="opensheetmusicdisplay.min.js"></script>
+<script>
+  let osmd = null, boxes = [];
+  const marks = {};
+
+  function unit() { return 10 * osmd.zoom; }
+  function svgEl() { return document.querySelector('#osmd svg'); }
+
+  // bounding box of every measure (all staves together), in OSMD units
+  function collect() {
+    boxes = [];
+    const ml = osmd.GraphicSheet.MeasureList;
+    for (let i = 0; i < ml.length; i++) {
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      for (const gm of ml[i] || []) {
+        if (!gm) continue;
+        const ps = gm.PositionAndShape, a = ps.AbsolutePosition;
+        x0 = Math.min(x0, a.x + ps.BorderLeft); x1 = Math.max(x1, a.x + ps.BorderRight);
+        y0 = Math.min(y0, a.y + ps.BorderTop); y1 = Math.max(y1, a.y + ps.BorderBottom);
+      }
+      boxes.push({ i, x0, y0, x1, y1 });
+    }
+  }
+
+  function px(b) {
+    const s = svgEl().getBoundingClientRect(), host = document.getElementById('osmd').getBoundingClientRect(), u = unit();
+    return { left: s.left - host.left + b.x0 * u, top: s.top - host.top + b.y0 * u - 4, w: (b.x1 - b.x0) * u, h: (b.y1 - b.y0) * u + 8 };
+  }
+
+  // kind: 'play' | 'from' | 'to'; i < 0 removes it
+  function mark(kind, i, scroll) {
+    if (marks[kind]) { marks[kind].remove(); delete marks[kind]; }
+    if (i < 0 || !boxes[i]) return;
+    const p = px(boxes[i]), d = document.createElement('div');
+    d.className = 'box ' + kind;
+    Object.assign(d.style, { left: p.left + 'px', top: p.top + 'px', width: p.w + 'px', height: p.h + 'px' });
+    document.getElementById('osmd').appendChild(d); marks[kind] = d;
+    if (scroll) {
+      const r = d.getBoundingClientRect();
+      if (r.top < 60 || r.bottom > window.innerHeight - 20) window.scrollBy({ top: r.top - window.innerHeight * 0.3, behavior: 'smooth' });
+    }
+  }
+
+  function measureAt(cx, cy) {
+    const s = svgEl().getBoundingClientRect(), u = unit();
+    const ux = (cx - s.left) / u, uy = (cy - s.top) / u;
+    let best = -1, bd = 1e9;
+    for (const b of boxes) {
+      const dx = ux < b.x0 ? b.x0 - ux : ux > b.x1 ? ux - b.x1 : 0;
+      const dy = uy < b.y0 ? b.y0 - uy : uy > b.y1 ? uy - b.y1 : 0;
+      const d = dx + dy * 2;
+      if (d < bd) { bd = d; best = b.i; }
+    }
+    return bd < 6 ? best : -1;
+  }
+
+  async function start(xml, zoom) {
+    try {
+      osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay('osmd', { autoResize: false, backend: 'svg', drawTitle: true, drawPartNames: false });
+      await osmd.load(xml);
+      osmd.zoom = zoom || 0.6;
+      osmd.render();
+      collect();
+      document.getElementById('msg').remove();
+      document.getElementById('osmd').addEventListener('click', e => {
+        const i = measureAt(e.clientX, e.clientY);
+        if (i >= 0 && window.Android) Android.onMeasure(i);
+      });
+      if (window.Android) Android.onReady(boxes.length);
+    } catch (err) {
+      document.getElementById('msg').textContent = '악보를 그리지 못했습니다: ' + err;
+      if (window.Android) Android.onError('' + err);
+    }
+  }
+
+  if (window.Android) start(Android.xml(), Android.zoom());
+</script>
+</body></html>
