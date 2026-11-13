@@ -12,6 +12,8 @@
             android:layout_height="wrap_content" android:paddingEnd="8dp" />
         <Button android:id="@+id/btnRange" style="?attr/materialButtonOutlinedStyle"
             android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="범위" />
+        <Button android:id="@+id/btnFix" style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="색" />
         <Button android:id="@+id/btnMetro" style="?attr/materialButtonOutlinedStyle"
             android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="♩" />
         <Button android:id="@+id/btnLayer" style="?attr/materialButtonOutlinedStyle"
@@ -33,6 +35,19 @@
         <Button android:id="@+id/penErase" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="지우개" />
         <Button android:id="@+id/penUndo" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="되돌리기" />
         <Button android:id="@+id/penDone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="완료" />
+    </LinearLayout>
+    </HorizontalScrollView>
+    <HorizontalScrollView android:id="@+id/fixBar" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:background="#F4F0FA" android:visibility="gone">
+    <LinearLayout android:id="@+id/fixRow" android:layout_width="wrap_content"
+        android:layout_height="wrap_content" android:orientation="horizontal"
+        android:gravity="center_vertical" android:padding="4dp">
+        <TextView android:id="@+id/fixInfo" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="색 고치기: 색을 고른 뒤 음표를 누르세요 " android:paddingStart="8dp" />
+        <Button android:id="@+id/fixSmaller" android:layout_width="48dp" android:layout_height="wrap_content" android:text="−" />
+        <Button android:id="@+id/fixBigger" android:layout_width="48dp" android:layout_height="wrap_content" android:text="+" />
+        <Button android:id="@+id/fixUndo" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="되돌리기" />
+        <Button android:id="@+id/fixDone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="완료" />
     </LinearLayout>
     </HorizontalScrollView>
     <androidx.viewpager2.widget.ViewPager2 android:id="@+id/pager"

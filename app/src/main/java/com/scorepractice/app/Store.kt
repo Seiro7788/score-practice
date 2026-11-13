@@ -30,6 +30,9 @@ data class Range(
     val log: MutableList<Long> = mutableListOf()
 )
 
+/** colour correction on an already-coloured score: a notehead-shaped patch (normalized coords, r = width/page width) */
+data class Fix(val page: Int, val x: Float, val y: Float, val r: Float, val color: Int, val hollow: Boolean)
+
 /** handwriting stroke, normalized coordinates */
 data class Stroke(val page: Int, val color: Int, val width: Float, val pts: FloatArray)
 
@@ -37,6 +40,8 @@ class ScoreData {
     val layers = mutableListOf<Layer>()
     val ranges = mutableListOf<Range>()
     val strokes = mutableListOf<Stroke>()
+    val fixes = mutableListOf<Fix>()
+    var showFixes = true
     var activeLayer: String = ""
     var showInk = true
     var lastPage = 0
@@ -99,6 +104,13 @@ object Store {
                 d.strokes.add(Stroke(s.getInt("page"), s.getInt("color"), s.getDouble("width").toFloat(),
                     FloatArray(p.length()) { p.getDouble(it).toFloat() }))
             }
+            val fa = o.optJSONArray("fixes") ?: JSONArray()
+            for (i in 0 until fa.length()) {
+                val f = fa.getJSONObject(i)
+                d.fixes.add(Fix(f.getInt("page"), f.getDouble("x").toFloat(), f.getDouble("y").toFloat(),
+                    f.getDouble("r").toFloat(), f.getInt("color"), f.optBoolean("hollow")))
+            }
+            d.showFixes = o.optBoolean("showFixes", true)
             d.activeLayer = o.optString("activeLayer")
             d.showInk = o.optBoolean("showInk", true)
             d.lastPage = o.optInt("lastPage", 0)
@@ -127,6 +139,13 @@ object Store {
                     .put("pts", JSONArray().apply { s.pts.forEach { put(it.toDouble()) } }))
             }
         })
+        o.put("fixes", JSONArray().apply {
+            d.fixes.forEach { f ->
+                put(JSONObject().put("page", f.page).put("x", f.x.toDouble()).put("y", f.y.toDouble())
+                    .put("r", f.r.toDouble()).put("color", f.color).put("hollow", f.hollow))
+            }
+        })
+        o.put("showFixes", d.showFixes)
         o.put("activeLayer", d.activeLayer).put("showInk", d.showInk).put("lastPage", d.lastPage)
         writeSafe(dataFile(c, id), o.toString())
     }

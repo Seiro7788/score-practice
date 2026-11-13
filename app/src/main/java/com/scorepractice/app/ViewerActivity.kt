@@ -43,6 +43,10 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private lateinit var mPlay: Button
     private lateinit var mBeats: Button
     private val taps = mutableListOf<Long>()
+    private lateinit var fixBar: View
+    private var fixColor = Color.BLACK; private var fixHollow = false
+    private var fixSize = 0.012f
+    private val fixUndo = mutableListOf<Pair<Boolean, Fix>>()   // (added?, fix)
     private val metro = Metronome { b -> onBeat(b) }
 
     private lateinit var pdf: PdfRenderer
@@ -98,7 +102,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             if (last != null) { data.strokes.remove(last); onInkChanged() }
         }
         findViewById<Button>(R.id.penDone).setOnClickListener { switchMode(PageView.Mode.VIEW) }
-        setupPractice(); setupMetronome(id)
+        setupPractice(); setupMetronome(id); setupFix(id)
     }
 
     /** "오른쪽으로 밀면 다음 쪽" = right-to-left page order */
@@ -112,6 +116,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         mode = m
         pager.isUserInputEnabled = m == PageView.Mode.VIEW && pages[pager.currentItem]?.zoomed != true
         penBar.visibility = if (m == PageView.Mode.PEN) View.VISIBLE else View.GONE
+        fixBar.visibility = if (m == PageView.Mode.FIX) View.VISIBLE else View.GONE
+        if (m == PageView.Mode.FIX && !data.showFixes) { data.showFixes = true; redraw() }
         btnRange.text = if (m == PageView.Mode.RANGE) "범위 끝" else "범위"
         if (m == PageView.Mode.RANGE) toast("연습할 부분을 손가락으로 끌어 네모를 그리세요")
         if (m == PageView.Mode.PEN) { erasing = false; if (!data.showInk) { data.showInk = true; redraw() } }
@@ -129,7 +135,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     }
 
     private fun updatePracticeBar() {
-        val r = if (mode == PageView.Mode.PEN) null else currentRange()
+        val r = if (mode == PageView.Mode.PEN || mode == PageView.Mode.FIX) null else currentRange()
         practiceBar.visibility = if (r == null) View.GONE else View.VISIBLE
         if (r != null) {
             val n = pageRanges().size
@@ -206,6 +212,60 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             metroBar.visibility = if (metroBar.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
         show()
+    }
+
+    // ---- colour corrections (for scores that are already coloured)
+    private val FIX_COLORS = listOf(
+        Triple("검정(색 빼기)", Color.BLACK, false),
+        Triple("빈 머리", Color.WHITE, true),
+        Triple("♯ 검은건반", Color.rgb(255, 125, 125), false),
+        Triple("♯ 흰건반", Color.rgb(110, 35, 160), false),
+        Triple("♭ 검은건반", Color.rgb(80, 135, 255), false),
+        Triple("♭ 흰건반", Color.rgb(70, 190, 100), false),
+        Triple("× 검은건반", Color.rgb(255, 185, 185), false),
+        Triple("× 흰건반", Color.rgb(115, 105, 115), false)
+    )
+
+    private fun setupFix(id: String) {
+        fixBar = findViewById(R.id.fixBar)
+        fixSize = prefs.getFloat("fixSize_$id", 0.012f)
+        val row = findViewById<LinearLayout>(R.id.fixRow)
+        val btns = mutableListOf<Button>()
+        FIX_COLORS.forEachIndexed { i, (name, col, hollow) ->
+            val b = Button(this).apply {
+                text = name; textSize = 12f; isAllCaps = false
+                setTextColor(if (hollow) Color.BLACK else Color.WHITE)
+                setBackgroundColor(if (hollow) Color.rgb(235, 235, 235) else col)
+            }
+            b.setOnClickListener {
+                fixColor = col; fixHollow = hollow
+                btns.forEachIndexed { j, o -> o.alpha = if (j == i) 1f else 0.45f }
+            }
+            btns.add(b); row.addView(b, 1 + i)
+        }
+        btns.forEachIndexed { j, o -> o.alpha = if (j == 0) 1f else 0.45f }
+        findViewById<Button>(R.id.btnFix).setOnClickListener {
+            switchMode(if (mode == PageView.Mode.FIX) PageView.Mode.VIEW else PageView.Mode.FIX)
+            if (mode == PageView.Mode.FIX) toast("잘못 칠해진 음표: 색을 고르고 음표를 누르세요. 다시 누르면 취소")
+        }
+        val resize = { f: Float -> fixSize = (fixSize * f).coerceIn(0.005f, 0.04f); prefs.edit().putFloat("fixSize_$id", fixSize).apply(); toast("크기 ${(fixSize * 1000).toInt()}") }
+        findViewById<Button>(R.id.fixSmaller).setOnClickListener { resize(0.9f) }
+        findViewById<Button>(R.id.fixBigger).setOnClickListener { resize(1.1f) }
+        findViewById<Button>(R.id.fixUndo).setOnClickListener {
+            val u = fixUndo.removeLastOrNull() ?: return@setOnClickListener
+            if (u.first) data.fixes.remove(u.second) else data.fixes.add(u.second)
+            save(); redraw()
+        }
+        findViewById<Button>(R.id.fixDone).setOnClickListener { switchMode(PageView.Mode.VIEW) }
+    }
+
+    override fun onFixTap(page: Int, x: Float, y: Float) {
+        // tapping an existing patch removes it; otherwise add a patch in the chosen colour
+        val hit = data.fixes.filter { it.page == page && kotlin.math.abs(it.x - x) < it.r * 0.6f && kotlin.math.abs(it.y - y) < it.r * 0.5f }
+            .minByOrNull { kotlin.math.abs(it.x - x) + kotlin.math.abs(it.y - y) }
+        if (hit != null) { data.fixes.remove(hit); fixUndo.add(false to hit) }
+        else { val f = Fix(page, x, y, fixSize, fixColor, fixHollow); data.fixes.add(f); fixUndo.add(true to f) }
+        save(); redraw()
     }
 
     private fun onBeat(b: Int) {
@@ -295,6 +355,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         }
         val ink = CheckBox(this).apply { text = "필기 보이기"; isChecked = data.showInk; setOnCheckedChangeListener { _, v -> data.showInk = v; save(); redraw() } }
         box.addView(ink)
+        box.addView(CheckBox(this).apply { text = "색 고친 것 보이기"; isChecked = data.showFixes
+            setOnCheckedChangeListener { _, v -> data.showFixes = v; save(); redraw() } })
         box.addView(TextView(this).apply { text = "레이어 이름을 길게 누르면 이름 바꾸기·삭제"; alpha = 0.6f })
         val dlg = AlertDialog.Builder(this).setTitle("레이어").setView(box)
             .setPositiveButton("닫기", null)
