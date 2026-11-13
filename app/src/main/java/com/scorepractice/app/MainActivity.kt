@@ -8,6 +8,8 @@ import android.provider.OpenableColumns
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
@@ -33,6 +35,57 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) importPdf(uri)
     }
 
+    // ---- keeping the library outside the app
+    private val pickFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) chooseFolder(uri)
+    }
+    private val makeBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null) background("백업 만드는 중…") {
+            contentResolver.openOutputStream(uri)!!.use { Backup.writeZip(this, it) }; "백업 파일을 저장했습니다"
+        }
+    }
+    private val loadBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) background("백업 불러오는 중…") {
+            val n = contentResolver.openInputStream(uri)!!.use { Backup.readZip(this, it) }
+            Backup.sync(this); "악보 ${n}개를 불러왔습니다"
+        }
+    }
+
+    private fun background(msg: String, work: () -> String) {
+        val dlg = AlertDialog.Builder(this).setMessage(msg).setCancelable(false).show()
+        Thread {
+            val r = try { work() } catch (e: Exception) { "실패: ${e.message}" }
+            runOnUiThread { dlg.dismiss(); Toast.makeText(this, r, Toast.LENGTH_LONG).show(); all = Store.loadLibrary(this); refresh() }
+        }.start()
+    }
+
+    private fun chooseFolder(uri: Uri) {
+        try { Backup.setFolder(this, uri) } catch (e: Exception) { Toast.makeText(this, "이 폴더는 쓸 수 없습니다", Toast.LENGTH_LONG).show(); return }
+        if (Backup.folderHasLibrary(this, uri))
+            AlertDialog.Builder(this).setTitle("저장 폴더").setMessage("이 폴더에 전에 저장한 악보가 있습니다. 불러올까요?")
+                .setPositiveButton("불러오기") { _, _ -> background("불러오는 중…") { val n = Backup.importFromFolder(this, uri); Backup.sync(this); "악보 ${n}개를 불러왔습니다" } }
+                .setNegativeButton("아니요") { _, _ -> background("저장하는 중…") { if (Backup.sync(this)) "이 폴더에 저장했습니다" else "저장 실패" } }
+                .show()
+        else background("저장하는 중…") { if (Backup.sync(this)) "이제 이 폴더에 자동으로 저장됩니다" else "저장 실패" }
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menu.add(0, 1, 0, "저장 폴더 지정 (앱을 지워도 남음)")
+        menu.add(0, 2, 1, "백업 파일 만들기 (구글드라이브 등)")
+        menu.add(0, 3, 2, "백업 불러오기")
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        when (item.itemId) {
+            1 -> pickFolder.launch(null)
+            2 -> makeBackup.launch("악보연습_백업_" + java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.KOREA).format(java.util.Date()) + ".zip")
+            3 -> loadBackup.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed"))
+            else -> return super.onOptionsItemSelected(item)
+        }
+        return true
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -46,10 +99,18 @@ class MainActivity : AppCompatActivity() {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
         })
+        // fresh install with nothing yet: offer to load from a folder or a backup
+        if (Store.loadLibrary(this).isEmpty() && Backup.folder(this) == null)
+            AlertDialog.Builder(this).setTitle("처음 시작")
+                .setMessage("전에 쓰던 악보가 있으면 불러올 수 있습니다.\n\n· 저장 폴더: 앱을 지우기 전에 지정해 둔 휴대폰 폴더\n· 백업 파일: 구글드라이브 등에 올려 둔 백업\n\n나중에 오른쪽 위 메뉴(⋮)에서도 할 수 있습니다.")
+                .setPositiveButton("저장 폴더 고르기") { _, _ -> pickFolder.launch(null) }
+                .setNeutralButton("백업 파일") { _, _ -> loadBackup.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed")) }
+                .setNegativeButton("새로 시작", null).show()
     }
 
     override fun onResume() {
         super.onResume(); all = Store.loadLibrary(this); refresh()
+        Thread { Backup.sync(this) }.start()   // pick up changes made in the score screen
     }
 
     private fun refresh() {
@@ -90,7 +151,7 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("저장") { _, _ ->
                 s.composer = comp.text.toString().trim(); s.title = tit.text.toString().trim().ifEmpty { "제목 없음" }
                 if (isNew) all.add(s)
-                Store.saveLibrary(this, all); refresh()
+                Store.saveLibrary(this, all); refresh(); Thread { Backup.sync(this) }.start()
             }
             .setNegativeButton("취소") { _, _ -> if (isNew) Store.deleteScore(this, s) }
             .setCancelable(false).show()
@@ -101,7 +162,7 @@ class MainActivity : AppCompatActivity() {
             .setItems(arrayOf("제목·작곡가 수정", "삭제")) { _, w ->
                 if (w == 0) editInfo(s, false)
                 else AlertDialog.Builder(this).setMessage("'${s.title}'을(를) 삭제할까요? 연습 기록과 필기도 지워집니다.")
-                    .setPositiveButton("삭제") { _, _ -> all.remove(s); Store.deleteScore(this, s); Store.saveLibrary(this, all); refresh() }
+                    .setPositiveButton("삭제") { _, _ -> all.remove(s); Store.deleteScore(this, s); Store.saveLibrary(this, all); refresh(); Thread { Backup.sync(this) }.start() }
                     .setNegativeButton("취소", null).show()
             }.show()
     }

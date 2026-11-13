@@ -568,7 +568,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         override fun getItemCount() = pdf.pageCount
     }
 
-    override fun onPause() { super.onPause(); save(); if (metro.isRunning) { metro.stop(); mPlay.text = "▶ 시작" } }
+    override fun onPause() { super.onPause(); save(); Thread { Backup.sync(applicationContext) }.start(); if (metro.isRunning) { metro.stop(); mPlay.text = "▶ 시작" } }
 
     override fun onDestroy() {
         super.onDestroy()

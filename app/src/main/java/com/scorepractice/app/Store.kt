@@ -63,6 +63,7 @@ object Store {
     fun newId(): String = UUID.randomUUID().toString().substring(0, 8)
 
     private fun libFile(c: Context) = File(c.filesDir, "library.json")
+    fun libraryFile(c: Context) = libFile(c)
     fun scoreDir(c: Context) = File(c.filesDir, "scores").apply { mkdirs() }
     private fun dataFile(c: Context, id: String) = File(scoreDir(c), "$id.json")
 
