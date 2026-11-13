@@ -98,16 +98,18 @@ class PageView(context: Context, private val host: Host) : View(context) {
         textAlign = Paint.Align.CENTER; isFakeBoldText = true; color = Color.WHITE; style = Paint.Style.STROKE
     }
     private val guide = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; isFakeBoldText = true }
-    private val guideBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(200, 255, 255, 255) }
+    private val guideBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(110, 255, 255, 255) }
+    private val mark = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = Color.rgb(230, 0, 90); strokeWidth = 3f }
 
     companion object {
         val FINGER_ANGLES = floatArrayOf(0f, 33.75f, 67.5f, 101.25f, 135f)
         const val TOL = 15f
-        /** 1..5, 0 = leave mode, -1 = nothing */
+        /** 1..5, 0 = leave mode, -2 = cancel (225°), -1 = nothing */
         fun choice(dx: Float, dy: Float): Int {
             var a = Math.toDegrees(atan2(-dy.toDouble(), dx.toDouble())).toFloat()
             if (a < -90f) a += 360f
             if (abs(a - 180f) <= TOL) return 0
+            if (abs(a - 225f) <= TOL) return -2
             FINGER_ANGLES.forEachIndexed { i, t -> if (abs(a - t) <= TOL) return i + 1 }
             return -1
         }
@@ -209,21 +211,36 @@ class PageView(context: Context, private val host: Host) : View(context) {
 
     /** fan of the five numbers around the pressed point while swiping */
     private fun drawFingerGuide(c: Canvas) {
-        val s = fStart ?: return; val n = fNow ?: return
+        val s0 = fStart ?: return; val n = fNow ?: return
         if (fDragging || host.mode != Mode.FINGER) return
-        val sel = if (hypot(n.first - s.first, n.second - s.second) > 30f) choice(n.first - s.first, n.second - s.second) else -1
-        val R = 110f
-        c.drawCircle(s.first, s.second, R + 45f, guideBg)
+        val moved = hypot(n.first - s0.first, n.second - s0.second) > 30f
+        val sel = if (moved) choice(n.first - s0.first, n.second - s0.second) else -1
+        val R = 120f
+        c.drawCircle(s0.first, s0.second, R + 45f, guideBg)
         for (i in 0..4) {
             val a = Math.toRadians(FINGER_ANGLES[i].toDouble())
-            val gx = s.first + (R * cos(a)).toFloat(); val gy = s.second - (R * sin(a)).toFloat()
+            val gx = s0.first + (R * cos(a)).toFloat(); val gy = s0.second - (R * sin(a)).toFloat()
             guide.textSize = if (sel == i + 1) 64f else 40f
             guide.color = if (sel == i + 1) Color.rgb(200, 30, 30) else Color.rgb(60, 60, 60)
             c.drawText((i + 1).toString(), gx, gy + guide.textSize * 0.35f, guide)
         }
         guide.textSize = if (sel == 0) 40f else 30f; guide.color = if (sel == 0) Color.rgb(200, 30, 30) else Color.GRAY
-        c.drawText("완료", s.first - R, s.second + 12f, guide)
-        guide.color = Color.rgb(200, 30, 30); c.drawCircle(s.first, s.second, 6f, guide)
+        c.drawText("완료", s0.first - R, s0.second + 12f, guide)
+        val ca = Math.toRadians(225.0)
+        guide.textSize = if (sel == -2) 40f else 30f; guide.color = if (sel == -2) Color.rgb(200, 30, 30) else Color.GRAY
+        c.drawText("취소", s0.first + (R * cos(ca)).toFloat(), s0.second - (R * sin(ca)).toFloat() + 12f, guide)
+        // the pressed spot: crosshair + preview of the number that will be placed there
+        val ts = staffSpaceNorm() * dst.width() * z * 1.7f
+        c.drawCircle(s0.first, s0.second, ts * 0.7f, mark)
+        c.drawLine(s0.first - ts, s0.second, s0.first - ts * 0.75f, s0.second, mark)
+        c.drawLine(s0.first + ts * 0.75f, s0.second, s0.first + ts, s0.second, mark)
+        c.drawLine(s0.first, s0.second - ts, s0.first, s0.second - ts * 0.75f, mark)
+        c.drawLine(s0.first, s0.second + ts * 0.75f, s0.first, s0.second + ts, mark)
+        if (sel in 1..5) {
+            fingerPaint.textSize = ts; fingerHalo.textSize = ts; fingerHalo.strokeWidth = ts * 0.18f
+            c.drawText(sel.toString(), s0.first, s0.second + ts * 0.36f, fingerHalo)
+            c.drawText(sel.toString(), s0.first, s0.second + ts * 0.36f, fingerPaint)
+        }
     }
 
     private fun drawStroke(c: Canvas, pts: FloatArray, color: Int, w: Float) {

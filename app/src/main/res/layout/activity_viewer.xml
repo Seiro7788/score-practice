@@ -62,7 +62,7 @@
         android:visibility="gone">
         <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
             android:paddingStart="8dp" android:textSize="13sp"
-            android:text="손번호: 넣을 곳을 누르고 밀기  →1  ↗2  가파르게↗3  ↑4  ↖5   ←완료\n번호 누르기=지우기, 꾹 눌러 끌기=옮기기" />
+            android:text="손번호: 넣을 곳을 누르고 밀기  →1  ↗2  가파르게↗3  ↑4  ↖5   ←완료  ↙취소\n번호 누르기=지우기, 꾹 눌러 끌기=옮기기" />
         <Button android:id="@+id/fingerUndo" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="되돌리기" />
     </LinearLayout>
     <androidx.viewpager2.widget.ViewPager2 android:id="@+id/pager"
