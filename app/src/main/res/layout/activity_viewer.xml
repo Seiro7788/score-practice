@@ -55,11 +55,15 @@
         android:visibility="gone">
         <Button android:id="@+id/mM5" android:layout_width="52dp" android:layout_height="wrap_content" android:text="−5" />
         <Button android:id="@+id/mM1" android:layout_width="52dp" android:layout_height="wrap_content" android:text="−1" />
-        <TextView android:id="@+id/mBpm" android:layout_width="0dp" android:layout_weight="1"
-            android:layout_height="wrap_content" android:gravity="center" android:textSize="22sp" android:textStyle="bold" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="♩=" android:textSize="20sp" android:paddingStart="4dp" />
+        <EditText android:id="@+id/mBpm" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:gravity="center" android:textSize="22sp"
+            android:textStyle="bold" android:inputType="number" android:maxLength="3"
+            android:imeOptions="actionDone" android:selectAllOnFocus="true" />
         <Button android:id="@+id/mP1" android:layout_width="52dp" android:layout_height="wrap_content" android:text="+1" />
         <Button android:id="@+id/mP5" android:layout_width="52dp" android:layout_height="wrap_content" android:text="+5" />
-        <Button android:id="@+id/mBeats" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4박" />
+        <Button android:id="@+id/mBeats" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="박없음" />
         <Button android:id="@+id/mTap" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="탭" />
         <Button android:id="@+id/mPlay" android:layout_width="64dp" android:layout_height="wrap_content" android:text="▶" />
     </LinearLayout>

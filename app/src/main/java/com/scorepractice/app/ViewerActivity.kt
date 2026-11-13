@@ -39,7 +39,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private lateinit var practiceBar: View
     private lateinit var rName: TextView
     private lateinit var metroBar: View
-    private lateinit var mBpm: TextView
+    private lateinit var mBpm: EditText
     private lateinit var mPlay: Button
     private lateinit var mBeats: Button
     private val taps = mutableListOf<Long>()
@@ -166,9 +166,10 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private fun setupMetronome(id: String) {
         metroBar = findViewById(R.id.metroBar); mBpm = findViewById(R.id.mBpm)
         mPlay = findViewById(R.id.mPlay); mBeats = findViewById(R.id.mBeats)
-        metro.bpm = prefs.getInt("bpm_$id", prefs.getInt("bpm", 80)); metro.beats = prefs.getInt("beats_$id", 4)
+        metro.bpm = prefs.getInt("bpm_$id", 100); metro.beats = prefs.getInt("beats_$id", 1)
         val show = {
-            mBpm.text = "♩ = ${metro.bpm}"; mBeats.text = "${metro.beats}박"
+            if (mBpm.text.toString() != metro.bpm.toString()) mBpm.setText(metro.bpm.toString())
+            mBeats.text = if (metro.beats == 1) "박없음" else "${metro.beats}박"
             prefs.edit().putInt("bpm_$id", metro.bpm).putInt("bpm", metro.bpm).putInt("beats_$id", metro.beats).apply()
         }
         val add = { d: Int -> metro.bpm = (metro.bpm + d).coerceIn(20, 300); show() }
@@ -179,7 +180,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         mBeats.setOnClickListener {
             val opts = intArrayOf(1, 2, 3, 4, 6, 8)
             AlertDialog.Builder(this).setTitle("한 마디 박 수 (첫 박 강하게)")
-                .setItems(opts.map { if (it == 1) "강박 없음" else "${it}박" }.toTypedArray()) { _, i -> metro.beats = opts[i]; show() }.show()
+                .setItems(opts.map { if (it == 1) "박없음 (모두 같은 소리)" else "${it}박" }.toTypedArray()) { _, i -> metro.beats = opts[i]; show() }.show()
         }
         findViewById<Button>(R.id.mTap).setOnClickListener {
             val now = System.currentTimeMillis()
@@ -187,14 +188,19 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             taps.add(now); if (taps.size > 6) taps.removeAt(0)
             if (taps.size >= 2) { metro.bpm = (60000.0 / ((taps.last() - taps.first()) / (taps.size - 1).toDouble())).toInt().coerceIn(20, 300); show() }
         }
-        mBpm.setOnClickListener {
-            val e = EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER; setText(metro.bpm.toString()) }
-            AlertDialog.Builder(this).setTitle("빠르기 (BPM)").setView(e).setPositiveButton("확인") { _, _ ->
-                e.text.toString().toIntOrNull()?.let { metro.bpm = it.coerceIn(20, 300); show() } }.show()
+        // type the tempo directly; applied on Done or when the field loses focus
+        val applyTyped = {
+            mBpm.text.toString().toIntOrNull()?.let { metro.bpm = it.coerceIn(20, 300) }
+            show()
+            (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                .hideSoftInputFromWindow(mBpm.windowToken, 0)
+            mBpm.clearFocus()
         }
+        mBpm.setOnEditorActionListener { _, _, _ -> applyTyped(); true }
+        mBpm.setOnFocusChangeListener { _, has -> if (!has) { mBpm.text.toString().toIntOrNull()?.let { metro.bpm = it.coerceIn(20, 300) }; show() } }
         mPlay.setOnClickListener {
             if (metro.isRunning) { metro.stop(); mPlay.text = "▶"; mBpm.setBackgroundColor(Color.TRANSPARENT) }
-            else { metro.start(); mPlay.text = "■" }
+            else { mBpm.text.toString().toIntOrNull()?.let { metro.bpm = it.coerceIn(20, 300) }; show(); metro.start(); mPlay.text = "■" }
         }
         findViewById<Button>(R.id.btnMetro).setOnClickListener {
             metroBar.visibility = if (metroBar.visibility == View.VISIBLE) View.GONE else View.VISIBLE
