@@ -35,10 +35,13 @@
   function svgEl() { return document.querySelector('#osmd svg'); }
 
   // bounding box of every measure (all staves together), in OSMD units
+  // a measure is drawn only inside the section shown (long scores are drawn a section at a time)
+  function drawn(i) { const m = osmd.GraphicSheet.MeasureList[i]; return !!(m && m.some(g => g && g.ParentMusicSystem)); }
   function collect() {
     boxes = [];
     const ml = osmd.GraphicSheet.MeasureList;
     for (let i = 0; i < ml.length; i++) {
+      if (!drawn(i)) { boxes.push(null); continue; }
       let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, top = 1e9;
       for (const gm of ml[i] || []) {
         if (!gm) continue;
@@ -56,7 +59,9 @@
   }
 
   // kind: 'play' | 'from' | 'to'; i < 0 removes it
+  const markIdx = {};
   function mark(kind, i, scroll) {
+    markIdx[kind] = i;
     if (marks[kind]) { marks[kind].remove(); delete marks[kind]; }
     if (i < 0 || !boxes[i]) return;
     const p = px(boxes[i]), d = document.createElement('div');
@@ -105,10 +110,24 @@
   }
   function setColors(on) { colorize(on); setZoom(osmd.zoom); }
   // redraw at another size (the score re-flows to the screen width); marks and chords follow
+  // show measures a..b (indices); -1 = all
+  let range = [-1, -1];
+  function applyRange() {
+    if (range[0] < 0) osmd.setOptions({ drawFromMeasureNumber: 1, drawUpToMeasureNumber: Number.MAX_SAFE_INTEGER });
+    else osmd.setOptions({ drawFromMeasureNumber: range[0] + 1, drawUpToMeasureNumber: range[1] + 1 });
+  }
+  function showRange(a, b, then) {
+    range = [a, b];
+    setTimeout(() => {                         // let the "drawing…" note appear first
+      setZoom(osmd.zoom); window.scrollTo(0, 0);
+      if (then) then();
+    }, 30);
+  }
   function setZoom(z) {
-    osmd.zoom = z; osmd.render(); collect();
+    osmd.zoom = z; applyRange(); osmd.render(); collect();
     drawChords(chordList); drawDyn(dynList); drawMelody(melodyOn); nidx = null; drawFingers();
-    for (const k of Object.keys(marks)) { const i = marks[k].dataset.i | 0; mark(k, i); }
+    for (const k of Object.keys(markIdx)) mark(k, markIdx[k]);
+    if (window.Android) Android.onSection(range[0], range[1]);
   }
   // loudness band under each system: thin & pale = ppp ... thick & deep = fff; hairpins become wedges
   let dynList = [];
@@ -137,7 +156,7 @@
     const ox = s.left - h.left, oy = s.top - h.top;
     // systems: measures sharing a line
     const lines = {};
-    for (const b of boxes) { const k = Math.round(b.top); (lines[k] = lines[k] || []).push(b); }
+    for (const b of boxes) { if (!b) continue; const k = Math.round(b.top); (lines[k] = lines[k] || []).push(b); }
     for (const k of Object.keys(lines)) {
       const ms = lines[k], base = Math.max(...ms.map(b => b.y1)) * u + oy + 24;
       const pts = list.filter(p => p.v !== undefined && ms.some(b => b.i === p.m)).map(p => [ox + xAt(p.m, p.beat, p.L) * u, p.v]);
@@ -182,6 +201,7 @@
     const ml = osmd.GraphicSheet.MeasureList, nStaves = Math.max(...ml.map(m => (m || []).length));
     const voices = {};     // key "staff|voice" -> {staff, pts: [[x, y, midi, sys] | null(break)]}
     for (let i = 0; i < ml.length; i++) {
+      if (!drawn(i)) continue;
       const sys = Math.round(((ml[i] || [])[0] || { PositionAndShape: { AbsolutePosition: { y: 0 } } }).PositionAndShape.AbsolutePosition.y);
       for (let st = 0; st < (ml[i] || []).length; st++) {
         const gm = ml[i][st]; if (!gm) continue;
@@ -234,6 +254,7 @@
     const ux = (cx - s.left) / u, uy = (cy - s.top) / u;
     let best = -1, bd = 1e9;
     for (const b of boxes) {
+      if (!b) continue;
       const dx = ux < b.x0 ? b.x0 - ux : ux > b.x1 ? ux - b.x1 : 0;
       const dy = uy < b.y0 ? b.y0 - uy : uy > b.y1 ? uy - b.y1 : 0;
       const d = dx + dy * 2;
@@ -248,7 +269,7 @@
   function noteIndex() {           // every drawn note head: key "m|t|midi" -> {x, y, st}
     const idx = {}, ml = osmd.GraphicSheet.MeasureList;
     for (let i = 0; i < ml.length; i++) for (let st = 0; st < (ml[i] || []).length; st++) {
-      const gm = ml[i][st]; if (!gm) continue;
+      const gm = ml[i][st]; if (!gm || !drawn(i)) continue;
       for (const se of gm.staffEntries) {
         const t = Math.round(se.relInMeasureTimestamp.RealValue * 4 * 96) / 96;
         for (const gve of se.graphicalVoiceEntries) for (const g of gve.notes) {
@@ -365,6 +386,8 @@
       colorize(window.Android ? Android.showColors() : true);
       osmd.EngravingRules.MinimumDistanceBetweenSystems = 17;   // room for the loudness band and chord labels
       osmd.zoom = zoom || 0.6;
+      if (window.Android && Android.range) { const r = JSON.parse(Android.range()); range = [r[0], r[1]]; }
+      applyRange();
       osmd.render();
       collect();
       document.getElementById('msg').remove();

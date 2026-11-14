@@ -12,7 +12,11 @@ class XNote(val measure: Int, val onset: Double, var dur: Double, val midi: Int,
 /** one measure (index in file order) */
 class XMeasure(val number: String, var length: Double = 0.0, var forward: Boolean = false, var backward: Boolean = false,
                var times: Int = 2, val endings: MutableSet<Int> = mutableSetOf(), var fifths: Int = 0,
-               var minor: Boolean = false, var beats: Int = 4, var beatType: Int = 4)
+               var minor: Boolean = false, var beats: Int = 4, var beatType: Int = 4) {
+    var finalBar = false        // ends with a final double bar (light-heavy, not a repeat)
+    var newPage = false         // <print new-page="yes">
+    var words: String? = null   // first text direction in the measure (tempo, "2악장" …)
+}
 
 /** a dynamic mark (level = MIDI velocity) or a hairpin start/stop ("crescendo", "diminuendo", "stop") */
 class XDyn(val measure: Int, val pos: Double, val level: Int?, val wedge: String?, val accent: Boolean = false)   // accent = sf / sfz / fz …
@@ -33,6 +37,22 @@ class XScore(val measures: List<XMeasure>, val notes: List<XNote>, val tempo: In
                 done.remove(i); pass = 1; start = i + 1
             }
             i++
+        }
+        return out
+    }
+
+    /** where movements / separate pieces begin: after a final double bar (not a repeat), on a new page after one,
+     *  or where the measure numbers start again */
+    fun movementStarts(): List<Int> {
+        // marked in the file ("2악장 …", "3번 BWV 774"): use those
+        val marked = measures.indices.filter { i -> i > 0 && measures[i].words?.let { w -> w.contains("악장") || Regex("^\\d+번").containsMatchIn(w) } == true }
+        if (marked.isNotEmpty()) return listOf(0) + marked
+        val out = mutableListOf(0)
+        for (i in 1 until measures.size) {
+            val prev = measures[i - 1]; val m = measures[i]
+            val n0 = prev.number.takeWhile { it.isDigit() }.toIntOrNull(); val n1 = m.number.takeWhile { it.isDigit() }.toIntOrNull()
+            val restart = n0 != null && n1 != null && n1 <= 1 && n0 > 4
+            if ((prev.finalBar && !prev.backward) || restart) if (i - out.last() >= 8) out.add(i)
         }
         return out
     }
@@ -105,6 +125,7 @@ object MusicXml {
                         "wedge" -> if (inDir) dirWedge = p.getAttributeValue(null, "type")
                         "sound" -> if (firstTempo == 0) p.getAttributeValue(null, "tempo")?.toDoubleOrNull()?.let { if (it > 0) firstTempo = it.toInt() }
                         "forward" -> inForward = true
+                        "print" -> if (part == 0 && mi >= 0 && p.getAttributeValue(null, "new-page") == "yes") measures[mi].newPage = true
                         "repeat" -> if (part == 0 && mi >= 0) {
                             val m = measures[mi]
                             if (p.getAttributeValue(null, "direction") == "forward") m.forward = true
@@ -122,6 +143,8 @@ object MusicXml {
                     val t = text.toString().trim()
                     when (p.name) {
                         "divisions" -> t.toDoubleOrNull()?.let { if (it > 0) divisions = it }
+                        "bar-style" -> if (part == 0 && mi >= 0 && t == "light-heavy") measures[mi].finalBar = true
+                        "words" -> if (part == 0 && mi >= 0 && measures[mi].words == null && t.isNotEmpty()) measures[mi].words = t
                         "fifths" -> t.toIntOrNull()?.let { fifths = it; if (part == 0 && mi >= 0) measures[mi].fifths = it }
                         "mode" -> { minorMode = t == "minor"; if (part == 0 && mi >= 0) measures[mi].minor = minorMode }
                         "beats" -> t.toIntOrNull()?.let { tBeats = it; if (part == 0 && mi >= 0) measures[mi].beats = it }

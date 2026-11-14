@@ -60,9 +60,22 @@ class XmlViewActivity : AppCompatActivity() {
         status = TextView(this).apply { setPadding(dp(12), dp(6), dp(6), dp(6)); textSize = 14f; setTextColor(Color.rgb(30, 30, 30)) }
         top.addView(Button(this).apply { text = "◀ 뒤로"; isAllCaps = false; minWidth = 0; minimumWidth = 0; setOnClickListener { finish() } })
         top.addView(status, LinearLayout.LayoutParams(0, -2, 1f))
+        stopBtn = Button(this).apply { text = "■ 정지"; isAllCaps = false; minWidth = 0; minimumWidth = 0; isEnabled = false; setOnClickListener { stop() } }
+        top.addView(stopBtn)
         for ((t, f) in listOf("가−" to 0.85, "가+" to 1.18)) top.addView(Button(this).apply {
             text = t; isAllCaps = false; minWidth = 0; minimumWidth = 0; setOnClickListener { zoomBy(f) } })
         root.addView(top)
+        // long scores are drawn one part at a time: a movement (or a chosen range of measures)
+        setupSections(id)
+        if (secs.isNotEmpty()) {
+            val srow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(Color.rgb(238, 246, 238)) }
+            fun b(t: String, on: () -> Unit) = Button(this).apply { text = t; isAllCaps = false; minWidth = 0; minimumWidth = 0; setOnClickListener { on() } }
+            srow.addView(b("◀") { stepSection(-1) })
+            secBtn = b("") { chooseSection() }
+            srow.addView(secBtn, LinearLayout.LayoutParams(0, -2, 1f))
+            srow.addView(b("▶") { stepSection(1) })
+            root.addView(srow); updateSecLabel()
+        }
         web = WebView(this)
         web.settings.javaScriptEnabled = true
         web.settings.allowFileAccess = true
@@ -175,6 +188,8 @@ class XmlViewActivity : AppCompatActivity() {
             } catch (e: Exception) {}
             return a.toString()
         }
+        @JavascriptInterface fun range(): String = "[$curA,$curB]"
+        @JavascriptInterface fun onSection(a: Int, b: Int) { main.post { switching = false; updateSecLabel(); if (players.isEmpty() && !fingerMode) idleText() } }
         @JavascriptInterface fun xfingers(): String = fingersJson()
         @JavascriptInterface fun fingerScale(): Double = data.fingerScale.toDouble()
         @JavascriptInterface fun fingerTap(m: Int, t: Double, k: Int) { main.post { tapFinger(m, t, k) } }
@@ -210,7 +225,8 @@ class XmlViewActivity : AppCompatActivity() {
         playA = a; playB = b
         val ch = PlayChoice(data.playHands, loop = loop, fromIdx = a, toIdx = b)
         val sound = data.playSound
-        status.text = "준비 중…"
+        status.text = "준비 중… (■ 정지로 취소)"
+        val token = ++playToken; stopBtn.isEnabled = true
         Thread {
             val err = try {
                 val tl = Timeline.build(sc, ch, bpm)
@@ -220,6 +236,7 @@ class XmlViewActivity : AppCompatActivity() {
                     if (sound != 0) { val f = File(cacheDir, "xsing.wav"); if (Singer.render(this, Timeline.melody(tl), f, score.composer)) files.add(f) }
                     times = Timeline.measureTimes(sc, ch, bpm)
                     main.post {
+                        if (token != playToken) return@post      // stopped while getting ready
                         stopPlayers()
                         for (f in files) players.add(MidiPlayer.player(this, f, loop).apply { setOnCompletionListener { if (!loop) stop() } })
                         players.reversed().forEach { it.start() }   // voice first, piano right after
@@ -239,7 +256,16 @@ class XmlViewActivity : AppCompatActivity() {
             val p = players.firstOrNull() ?: return
             val t = try { p.currentPosition / 1000.0 } catch (e: Exception) { return }
             val m = times.lastOrNull { it.second <= t + 0.02 }?.first ?: -1
-            if (m != lastMark) { lastMark = m; js("mark('play',$m,true)") }
+            if (m != lastMark) {
+                lastMark = m
+                // the measure being played is in another part of a long score: show that part
+                if (m >= 0 && curA >= 0 && (m < curA || m > curB) && !switching) {
+                    val sct = secs.firstOrNull { m in it.first..it.second }
+                    switching = true
+                    if (sct != null) showSection(sct.first, sct.second) else showSection(m, minOf(sc.measures.size - 1, m + 59))
+                }
+                js("mark('play',$m,true)")
+            }
             main.postDelayed(this, 80)
         }
     }
@@ -253,12 +279,88 @@ class XmlViewActivity : AppCompatActivity() {
     }
 
     private fun stop() {
+        playToken++; if (::stopBtn.isInitialized) stopBtn.isEnabled = false
         stopPlayers(); from = -1
         js("mark('play',-1)"); js("mark('from',-1)"); js("mark('to',-1)")
         idleText()
     }
 
     override fun onPause() { super.onPause(); stop() }
+
+    // ---------------------------------------------------------------- playing / parts of long scores
+    private var playToken = 0
+    private lateinit var stopBtn: Button
+    private var secs: List<Triple<Int, Int, String>> = emptyList()
+    private var curA = -1; private var curB = -1
+    private var switching = false
+    private var secBtn: Button? = null
+    private var scoreId = ""
+
+    private fun setupSections(id: String) {
+        scoreId = id
+        val n = sc.measures.size
+        val starts = sc.movementStarts()
+        if (n <= 100 && starts.size <= 1) return
+        secs = if (starts.size > 1) starts.mapIndexed { k, a ->
+            val b = (starts.getOrNull(k + 1) ?: n) - 1
+            val w = sc.measures[a].words?.takeIf { it.contains("악장") || it.contains("번") || it.contains("No", true) }
+            Triple(a, b, w?.take(22) ?: "${k + 1}부분")
+        } else (0 until n step 60).map { a -> Triple(a, minOf(n - 1, a + 59), "${label(a)}–${label(minOf(n - 1, a + 59))}마디") }
+        val saved = prefs.getString("xmlSec_$id", null)?.split(",")?.mapNotNull { it.toIntOrNull() }
+        if (saved != null && saved.size == 2 && saved[0] in -1 until n) { curA = saved[0]; curB = saved[1].coerceIn(saved[0], n - 1) }
+        else { curA = secs[0].first; curB = secs[0].second }
+        if (curA < 0) curB = -1
+    }
+
+    private fun updateSecLabel() {
+        val b = secBtn ?: return
+        b.text = if (curA < 0) "전체 ${sc.measures.size}마디 ▾" else {
+            val nm = secs.firstOrNull { it.first == curA && it.second == curB }?.third
+            (if (nm != null && !nm.endsWith("마디")) "$nm · " else "") + "${label(curA)}–${label(curB)}마디 ▾"
+        }
+    }
+
+    private fun showSection(a: Int, b: Int) {
+        curA = a; curB = if (a < 0) -1 else b
+        prefs.edit().putString("xmlSec_$scoreId", "$curA,$curB").apply()
+        status.text = "악보 그리는 중…"; updateSecLabel()
+        js("showRange($curA,$curB)")
+    }
+
+    private fun stepSection(d: Int) {
+        if (curA < 0) { showSection(secs[0].first, secs[0].second); return }
+        val i = secs.indexOfFirst { it.first == curA && it.second == curB }
+        if (i >= 0) { secs.getOrNull(i + d)?.let { showSection(it.first, it.second) } ?: toast(if (d > 0) "마지막 부분입니다" else "첫 부분입니다"); return }
+        val len = curB - curA + 1; val a = (curA + d * len).coerceIn(0, maxOf(0, sc.measures.size - len))
+        showSection(a, minOf(sc.measures.size - 1, a + len - 1))
+    }
+
+    private fun chooseSection() {
+        val items = secs.map { (a, b, nm) -> (if (nm.endsWith("마디")) "" else "$nm  ") + "(${label(a)}–${label(b)}마디)" } +
+            listOf("직접 정하기 (시작·끝 마디)", "전체 보기 (곡이 길면 오래 걸립니다)")
+        androidx.appcompat.app.AlertDialog.Builder(this).setTitle("어느 부분을 볼까요?")
+            .setItems(items.toTypedArray()) { _, i ->
+                when {
+                    i < secs.size -> showSection(secs[i].first, secs[i].second)
+                    i == secs.size -> customSection()
+                    else -> showSection(-1, -1)
+                }
+            }.show()
+    }
+
+    private fun customSection() {
+        val a0 = if (curA >= 0) curA else 0; val b0 = if (curA >= 0) curB else minOf(sc.measures.size - 1, 59)
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
+        fun num(v: String) = android.widget.EditText(this).apply { setText(v); inputType = android.text.InputType.TYPE_CLASS_TEXT; minEms = 3; gravity = Gravity.CENTER; setSelectAllOnFocus(true) }
+        val ea = num(label(a0)); val eb = num(label(b0))
+        row.addView(TextView(this).apply { text = "마디 " }); row.addView(ea); row.addView(TextView(this).apply { text = " ~ " }); row.addView(eb)
+        androidx.appcompat.app.AlertDialog.Builder(this).setTitle("볼 마디 범위").setView(row)
+            .setNegativeButton("취소", null)
+            .setPositiveButton("보기") { _, _ ->
+                val a = idxOf(ea.text.toString(), a0); val b = idxOf(eb.text.toString(), b0)
+                showSection(minOf(a, b), maxOf(a, b))
+            }.show()
+    }
 
     // ---------------------------------------------------------------- fingering
     private var fingerMode = false
