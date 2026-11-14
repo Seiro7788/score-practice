@@ -46,6 +46,8 @@ class PageView(context: Context, private val host: Host) : View(context) {
         fun onFingerExit()
         fun onUndoGesture()
         fun onFlick(dir: Int)   // +1 next page, -1 previous
+        val fixAreaErase: Boolean   // colour-fix mode: drag a box to remove the colours inside it
+        fun onFixArea(page: Int, x0: Float, y0: Float, x1: Float, y1: Float)
     }
 
     enum class Mode { VIEW, RANGE, PEN, FIX, FINGER }
@@ -394,7 +396,23 @@ class PageView(context: Context, private val host: Host) : View(context) {
             }
             Mode.FIX -> {
                 if (am == MotionEvent.ACTION_DOWN) { downT = e.eventTime; downX = e.x; downY = e.y }
-                if (am == MotionEvent.ACTION_UP && isFlick(e, 600L)) { host.onFlick(if (e.x < downX) 1 else -1); return true }
+                if (host.fixAreaErase && am != MotionEvent.ACTION_DOWN) {
+                    // box: from where the finger went down to where it is now
+                    if (hypot(e.x - downX, e.y - downY) >= 20f || dragStart != null) {
+                        when (am) {
+                            MotionEvent.ACTION_MOVE -> { dragStart = nx(downX) to ny(downY); dragNow = nx(e.x) to ny(e.y); invalidate(); return true }
+                            MotionEvent.ACTION_UP -> {
+                                val a = dragStart ?: (nx(downX) to ny(downY))
+                                val bx = nx(e.x); val by = ny(e.y)
+                                dragStart = null; dragNow = null; invalidate()
+                                host.onFixArea(page, minOf(a.first, bx), minOf(a.second, by), maxOf(a.first, bx), maxOf(a.second, by))
+                                return true
+                            }
+                            MotionEvent.ACTION_CANCEL -> { dragStart = null; dragNow = null; invalidate(); return true }
+                        }
+                    }
+                }
+                if (am == MotionEvent.ACTION_UP && !host.fixAreaErase && isFlick(e, 600L)) { host.onFlick(if (e.x < downX) 1 else -1); return true }
                 if (am == MotionEvent.ACTION_UP && hypot(e.x - downX, e.y - downY) < 20f) {
                     val o = origs[page]
                     if (o != null) {

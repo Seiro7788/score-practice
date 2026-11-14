@@ -187,6 +187,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private fun switchMode(m: PageView.Mode) {
         mode = m
         updateUndoBox()
+        if (m != PageView.Mode.FIX && fixAreaErase && ::areaBtn.isInitialized) areaBtn.performClick()
         pager.isUserInputEnabled = m == PageView.Mode.VIEW
         penBar.visibility = if (m == PageView.Mode.PEN) View.VISIBLE else View.GONE
         fixBar.visibility = if (m == PageView.Mode.FIX) View.VISIBLE else View.GONE
@@ -326,6 +327,27 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             if (mode == PageView.Mode.FIX) toast("색을 고르고 음표를 누르세요 (크기·빈 음표는 자동). 다시 누르면 취소")
         }
         findViewById<Button>(R.id.fixDone).setOnClickListener { switchMode(PageView.Mode.VIEW) }
+        // area eraser: drag a box over the page, the colours of the notes inside go
+        areaBtn = Button(this).apply {
+            text = "영역 지우기"; isAllCaps = false
+            setOnClickListener {
+                fixAreaErase = !fixAreaErase
+                setTextColor(if (fixAreaErase) Color.rgb(200, 30, 30) else Color.BLACK)
+                text = if (fixAreaErase) "영역 지우기 켜짐" else "영역 지우기"
+                if (fixAreaErase) toast("지울 곳을 네모로 끌어서 감싸세요 (누르기 = 한 음표 지우기)")
+            }
+        }
+        row.addView(areaBtn, row.childCount - 1)
+    }
+
+    override var fixAreaErase = false
+    private lateinit var areaBtn: Button
+
+    override fun onFixArea(page: Int, x0: Float, y0: Float, x1: Float, y1: Float) {
+        val gone = data.fixes.filter { it.page == page && it.x in x0..x1 && it.y in y0..y1 }
+        if (gone.isEmpty()) { toast("네모 안에 색칠된 음표가 없습니다"); return }
+        data.fixes.removeAll(gone.toSet()); save(); pages.values.forEach { it.refreshFixes(page) }
+        toast("색 ${gone.size}개를 지웠습니다 (↶ 로 되돌리기)")
     }
 
     override fun onFixTap(page: Int, x: Float, y: Float, head: HeadFix.Head?, w: Int, h: Int) {
@@ -333,6 +355,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         val hit = data.fixes.filter { it.page == page && kotlin.math.abs(it.x - x) < it.r * 1.1f && kotlin.math.abs((it.y - y) * h / w) < it.rb * 1.4f }
             .minByOrNull { kotlin.math.abs(it.x - x) + kotlin.math.abs(it.y - y) }
         if (hit != null) { data.fixes.remove(hit); save(); pages.values.forEach { it.refreshFixes(page) }; return }
+        if (fixAreaErase) return   // erasing: taps only remove
         if (head == null) { toast("음표를 찾지 못했습니다. 음표 한가운데를 눌러 주세요"); return }
         val f = Fix(page, head.x / w, head.y / h, head.a / w, fixColor, head.hollow, head.b / w)
         data.fixes.add(f); save(); pages.values.forEach { it.fixAdded(f) }
