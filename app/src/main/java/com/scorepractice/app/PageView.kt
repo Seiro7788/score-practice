@@ -275,7 +275,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
     private fun sx(x: Float) = dst.left + x * dst.width()
     private fun sy(y: Float) = dst.top + y * dst.height()
 
-    private fun visibleRanges() = host.data.ranges.filter { it.page == page && host.data.layer(it.layer)?.visible == true }
+    private fun visibleRanges() = host.data.ranges.filter { it.page == page && (host.data.showRanges || host.mode == Mode.RANGE) && host.data.layer(it.layer)?.visible == true }
 
     private fun hit(e: MotionEvent): Range? {
         val x = nx(e.x); val y = ny(e.y)

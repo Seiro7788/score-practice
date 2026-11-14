@@ -47,7 +47,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private val HI_PINK = Color.argb(80, 255, 60, 160); private val HI_BLUE = Color.argb(80, 40, 170, 255)
     override var erasing = false
     override var selectedRange: String? = null
-    private lateinit var practiceBar: View
+    private lateinit var practiceBar: LinearLayout
     private lateinit var rName: TextView
     private lateinit var metroBar: View
     private lateinit var mBpm: EditText
@@ -117,7 +117,12 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         })
         pageNo.text = pageLabel(pager.currentItem)
 
-        btnRange.setOnClickListener { switchMode(if (mode == PageView.Mode.RANGE) PageView.Mode.VIEW else PageView.Mode.RANGE) }
+        btnRange.setOnClickListener {
+            if (!data.showRanges && mode != PageView.Mode.RANGE && data.ranges.isNotEmpty()) {   // hidden: show them again first
+                data.showRanges = true; persist(); updatePracticeBar(); toast("연습 범위를 다시 보입니다 (한 번 더 누르면 범위 만들기)"); return@setOnClickListener
+            }
+            switchMode(if (mode == PageView.Mode.RANGE) PageView.Mode.VIEW else PageView.Mode.RANGE)
+        }
         findViewById<Button>(R.id.btnLayer).setOnClickListener { layerDialog() }
         findViewById<Button>(R.id.btnMenu).setOnClickListener { menuDialog() }
         findViewById<Button>(R.id.btnFull).setOnClickListener { if (mode != PageView.Mode.VIEW) switchMode(PageView.Mode.VIEW); hideMenus(true) }
@@ -233,7 +238,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     private fun updatePracticeBar() {
         val r = if (mode == PageView.Mode.PEN || mode == PageView.Mode.FIX || mode == PageView.Mode.FINGER) null else currentRange()
-        practiceBar.visibility = if (r == null || immersive) View.GONE else View.VISIBLE
+        practiceBar.visibility = if (r == null || immersive || (!data.showRanges && mode != PageView.Mode.RANGE)) View.GONE else View.VISIBLE
         if (r != null) {
             val n = pageRanges().size
             val todayN = r.log.count { PracticeStats.dayKey(it) == PracticeStats.today() }
@@ -269,6 +274,11 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         findViewById<Button>(R.id.rNext).setOnClickListener { step(1) }
         rName.setOnClickListener { openRecord() }
         findViewById<Button>(R.id.rLog).setOnClickListener { openRecord() }
+        // close: hide the ranges and this bar; [범위] shows them again
+        practiceBar.addView(Button(this).apply {
+            text = "✕"; minWidth = 0; minimumWidth = 0; setPadding(24, 0, 24, 0)
+            setOnClickListener { data.showRanges = false; persist(); updatePracticeBar(); toast("연습 범위를 숨겼습니다 — 위의 [범위]를 누르면 다시 보입니다") }
+        }, 0)
     }
 
     // ---- metronome

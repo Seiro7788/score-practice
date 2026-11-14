@@ -72,6 +72,7 @@ class ScoreData {
     var showFixes = true
     val fingers = mutableListOf<Finger>()
     var showFingers = true
+    var showRanges = true   // practice ranges on the score (hidden = practice bar closed too)
     val xfingers = mutableListOf<XFinger>()
     var activeLayer: String = ""
     var showInk = true
@@ -174,6 +175,7 @@ object Store {
                     g.getInt("n"), g.getDouble("s").toFloat(), g.optString("layer")))
             }
             d.showFingers = o.optBoolean("showFingers", true)
+            d.showRanges = o.optBoolean("showRanges", true)
             o.optJSONArray("xfingers")?.let { xa -> for (i in 0 until xa.length()) d.xfingers.add(XFinger.of(xa.getJSONObject(i))) }
             d.activeLayer = o.optString("activeLayer")
             d.showInk = o.optBoolean("showInk", true)
@@ -225,7 +227,7 @@ object Store {
                     .put("n", g.n).put("s", g.s.toDouble()).put("layer", g.layer))
             }
         })
-        o.put("showFingers", d.showFingers)
+        o.put("showFingers", d.showFingers).put("showRanges", d.showRanges)
         o.put("xfingers", JSONArray().apply { d.xfingers.forEach { put(it.toJson()) } })
         o.put("activeLayer", d.activeLayer).put("showInk", d.showInk).put("lastPage", d.lastPage)
         o.put("bpm", d.bpm).put("xmlBpm", d.xmlBpm).put("beats", d.beats).put("fingerScale", d.fingerScale.toDouble()).put("playHands", d.playHands).put("playSound", d.playSound).put("keySig", d.keySig).put("lowerTreble", d.lowerTreble)
