@@ -436,7 +436,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                         }
                         null
                     }
-                } catch (e: Exception) { e.message ?: e.toString() }
+                } catch (e: Throwable) { if (e is OutOfMemoryError) "곡이 너무 길어 메모리가 모자랍니다. 마디 범위를 줄여 주세요" else (e.message ?: e.toString()) }
                 main.post { play.isEnabled = true; play.text = if (err == null) "■ 멈춤" else "▶ 재생"; if (err != null) toast(err) }
             }.start()
         }
@@ -646,7 +646,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                 contentResolver.openOutputStream(uri)!!.use { out ->
                     PdfExport.export(pdf, pdf, snap, exportOpt, out) { i, n -> main.post { msg.text = "PDF 만드는 중… $i / $n 쪽" } }
                 }; null
-            } catch (e: Exception) { e.message ?: e.toString() }
+            } catch (e: Throwable) { if (e is OutOfMemoryError) "곡이 너무 길어 메모리가 모자랍니다. 마디 범위를 줄여 주세요" else (e.message ?: e.toString()) }
             main.post { dlg.dismiss(); toast(if (err == null) "PDF로 저장했습니다" else "저장 실패: $err") }
         }.start()
     }

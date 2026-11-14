@@ -100,7 +100,7 @@
   // redraw at another size (the score re-flows to the screen width); marks and chords follow
   function setZoom(z) {
     osmd.zoom = z; osmd.render(); collect();
-    drawChords(chordList); drawDyn(dynList);
+    drawChords(chordList); drawDyn(dynList); drawMelody(melodyOn);
     for (const k of Object.keys(marks)) { const i = marks[k].dataset.i | 0; mark(k, i); }
   }
   // loudness band under each system: thin & pale = ppp ... thick & deep = fff; hairpins become wedges
@@ -132,20 +132,76 @@
     const lines = {};
     for (const b of boxes) { const k = Math.round(b.top); (lines[k] = lines[k] || []).push(b); }
     for (const k of Object.keys(lines)) {
-      const ms = lines[k], base = Math.max(...ms.map(b => b.y1)) * u + oy + 14;
-      const pts = list.filter(p => ms.some(b => b.i === p.m)).map(p => [ox + xAt(p.m, p.beat, p.L) * u, p.v]);
+      const ms = lines[k], base = Math.max(...ms.map(b => b.y1)) * u + oy + 24;
+      const pts = list.filter(p => p.v !== undefined && ms.some(b => b.i === p.m)).map(p => [ox + xAt(p.m, p.beat, p.L) * u, p.v]);
       for (let i = 0; i + 1 < pts.length; i++) {
         const [x0, v0] = pts[i], [x1, v1] = pts[i + 1]; if (x1 <= x0) continue;
-        const h0 = 1 + 6 * (v0 - 25) / 95, h1 = 1 + 6 * (v1 - 25) / 95;
+        const h0 = 1 + 9 * (v0 - 25) / 95, h1 = 1 + 9 * (v1 - 25) / 95;
         const poly = document.createElementNS(ns, 'polygon');
         poly.setAttribute('points', `${x0},${base - h0} ${x1},${base - h1} ${x1},${base + h1} ${x0},${base + h0}`);
         poly.setAttribute('fill', colorOf((v0 + v1) / 2)); poly.setAttribute('fill-opacity', '0.85');
         svg.appendChild(poly);
       }
+      // hairpins: dark "<" / ">" drawn on the band
+      for (const p of list.filter(q => q.pin && ms.some(b => b.i === q.m))) {
+        const xa = ox + xAt(p.m, p.beat, p.L) * u;
+        const xb = ms.some(b => b.i === p.m2) ? ox + xAt(p.m2, p.beat2, p.L2) * u : Math.max(...ms.map(b => b.x1)) * u + ox;
+        if (xb - xa < 4) continue;
+        const pl = document.createElementNS(ns, 'polyline'), w = 6, open = p.pin > 0;
+        pl.setAttribute('points', open ? `${xb},${base - w} ${xa},${base} ${xb},${base + w}` : `${xa},${base - w} ${xb},${base} ${xa},${base + w}`);
+        pl.setAttribute('fill', 'none'); pl.setAttribute('stroke', '#333'); pl.setAttribute('stroke-width', '1.3'); pl.setAttribute('stroke-opacity', '0.75');
+        svg.appendChild(pl);
+      }
+      // sf / sfz / fz: a red spike
+      for (const p of list.filter(q => q.acc && ms.some(b => b.i === q.m))) {
+        const x = ox + xAt(p.m, p.beat, p.L) * u, tri = document.createElementNS(ns, 'polygon');
+        tri.setAttribute('points', `${x - 4},${base + 3} ${x},${base - 13} ${x + 4},${base + 3}`);
+        tri.setAttribute('fill', '#D7263D'); tri.setAttribute('fill-opacity', '0.9');
+        svg.appendChild(tri);
+      }
     }
     host.appendChild(svg);
   }
   function toggleDyn(on) { document.getElementById('osmd').classList.toggle('nodyn', !on); }
+
+  // main melody: a yellow highlighter line behind the notes, joining the top notes of the upper staff;
+  // it breaks at rests and at line ends (phrase by phrase)
+  function drawMelody(on) {
+    document.querySelectorAll('.melody').forEach(e => e.remove());
+    if (!on) return;
+    const svg = svgEl(), ns = 'http://www.w3.org/2000/svg';
+    const u = 10;   // inside the score's own SVG drawing: 10 per unit (zoom is applied by the SVG itself)
+    const ml = osmd.GraphicSheet.MeasureList, phrases = []; let cur = [], lastTop = null;
+    for (let i = 0; i < ml.length; i++) {
+      const gm = (ml[i] || [])[0]; if (!gm) continue;
+      const top = Math.round(gm.PositionAndShape.AbsolutePosition.y);
+      if (lastTop !== null && top !== lastTop && cur.length) { phrases.push(cur); cur = []; }   // new line of music
+      lastTop = top;
+      const entries = [...gm.staffEntries].sort((a, b) => a.PositionAndShape.AbsolutePosition.x - b.PositionAndShape.AbsolutePosition.x);
+      for (const se of entries) {
+        let best = null, rest = true;
+        for (const gve of se.graphicalVoiceEntries) for (const gn of gve.notes) {
+          const n = gn.sourceNote; if (!n || n.isRest()) continue;
+          rest = false;
+          if (!best || n.halfTone > best.sourceNote.halfTone) best = gn;
+        }
+        if (rest) { if (cur.length) { phrases.push(cur); cur = []; } continue; }   // a rest ends the phrase
+        const a = best.PositionAndShape.AbsolutePosition;
+        cur.push([(a.x + 0.6) * u, a.y * u]);
+      }
+    }
+    if (cur.length) phrases.push(cur);
+    for (const ph of phrases) {
+      if (ph.length < 2) continue;
+      const path = document.createElementNS(ns, 'path');
+      path.setAttribute('d', 'M' + ph.map(p => p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' L'));
+      path.setAttribute('class', 'melody');
+      path.setAttribute('fill', 'none'); path.setAttribute('stroke', '#FFD400'); path.setAttribute('stroke-opacity', '0.55');
+      path.setAttribute('stroke-width', (1.1 * u).toFixed(1)); path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
+      svg.insertBefore(path, svg.firstChild);        // behind everything: the notes stay fully visible
+    }
+  }
+  let melodyOn = true;
 
   function toggleChords(on) { document.getElementById('osmd').classList.toggle('hide', !on); }
 
@@ -167,7 +223,7 @@
       osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay('osmd', { autoResize: false, backend: 'svg', drawTitle: true, drawPartNames: false, coloringEnabled: true });
       await osmd.load(xml);
       colorize(window.Android ? Android.showColors() : true);
-      osmd.EngravingRules.MinimumDistanceBetweenSystems = 14;   // room for the loudness band and chord labels
+      osmd.EngravingRules.MinimumDistanceBetweenSystems = 17;   // room for the loudness band and chord labels
       osmd.zoom = zoom || 0.6;
       osmd.render();
       collect();
@@ -179,6 +235,7 @@
       if (window.Android) {
         try { chordList = JSON.parse(Android.chords()); drawChords(chordList); toggleChords(Android.showChords()); } catch (e) {}
         try { dynList = JSON.parse(Android.dynamics()); drawDyn(dynList); toggleDyn(Android.showDyn()); } catch (e) {}
+        try { melodyOn = Android.showMelody(); drawMelody(melodyOn); } catch (e) {}
         Android.onReady(boxes.length);
       }
     } catch (err) {

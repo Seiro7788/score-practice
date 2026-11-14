@@ -291,33 +291,61 @@ object Singer {
         return out
     }
 
-    /** render the melody to a WAV file; returns false if nothing to sing */
+    /**
+     * render the melody to a WAV file, written piece by piece (long pieces would not fit in memory at once);
+     * returns false if nothing to sing
+     */
     fun render(c: Context, melody: List<TNote>, out: File, composer: String = ""): Boolean {
         if (melody.isEmpty()) return false
-        val keepOctave = Regex("바흐|bach|스칼라티|scarlatti", RegexOption.IGNORE_CASE).containsMatchIn(composer)
         prepare(c)   // make the voice first (TTS); also tells how early each consonant starts
-        val total = ((melody.last().t + melody.last().d + 0.4) * RATE).toInt()
-        val mixb = FloatArray(total)
+        val keepOctave = Regex("바흐|bach|스칼라티|scarlatti", RegexOption.IGNORE_CASE).containsMatchIn(composer)
+        // every note: start sample, samples
+        class Job(val a: Int, val n: TNote, val f: Double, val len: Int, val female: Boolean)
+        val jobs = mutableListOf<Job>()
         for (ph in phrases(melody)) {
             val mids = ph.map { it.midi }.sorted(); val med = mids[mids.size / 2]
             val female = med >= 60                                     // one voice for the whole phrase
             val lo = if (female) 60 else 43; val hi = if (female) 81 else 65
-            // whole-octave shift for the phrase that puts most notes in the voice's range
             val shift = if (keepOctave) 0 else listOf(0, -12, 12, -24, 24).maxByOrNull { s -> ph.count { it.midi + s in lo..hi } * 10 - abs(s) / 12 } ?: 0
             for ((k, n) in ph.withIndex()) {
                 val f = 440.0 * 2.0.pow((n.midi + shift - 69) / 12.0)
-                // legato: hold until the next note of the phrase starts (small overlap for a smooth join)
-                val endT = if (k + 1 < ph.size) ph[k + 1].t + 0.015 else n.t + n.d
+                val endT = if (k + 1 < ph.size) ph[k + 1].t + 0.015 else n.t + n.d     // legato
                 val pre = preRoll(c, n.step)
-                val len = max(1, ((endT - n.t) * RATE).toInt() + pre); val a = max(0, (n.t * RATE).toInt() - pre)
-                val v = sing(c, n.step, f, len, female)
-                val loud = (0.4 + 0.6 * n.vel / 112.0).toFloat()          // sing softer in p, louder in f
-                for (i in v.indices) v[i] *= loud
-                for (i in v.indices) if (a + i < total) mixb[a + i] += v[i]
+                val len = max(1, min(((endT - n.t) * RATE).toInt() + pre, 20 * RATE))
+                jobs.add(Job(max(0, (n.t * RATE).toInt() - pre), n, f, len, female))
             }
         }
-        val peak = max(1e-6f, mixb.maxOf { abs(it) }); val g = 0.85f / peak
-        writeWav(out, FloatArray(total) { mixb[it] * g })
+        jobs.sortBy { it.a }
+        val total = jobs.maxOf { it.a + it.len } + (0.3 * RATE).toInt()
+        RandomAccessFile(out, "rw").use { o ->
+            o.setLength(0)
+            fun i32(v: Int) { o.write(v and 0xff); o.write((v shr 8) and 0xff); o.write((v shr 16) and 0xff); o.write((v shr 24) and 0xff) }
+            fun i16(v: Int) { o.write(v and 0xff); o.write((v shr 8) and 0xff) }
+            o.writeBytes("RIFF"); i32(36 + total * 2); o.writeBytes("WAVEfmt "); i32(16); i16(1); i16(1); i32(RATE); i32(RATE * 2); i16(2); i16(16)
+            o.writeBytes("data"); i32(total * 2)
+            val win = 60 * RATE                                          // 60 s working window
+            val buf = FloatArray(win + 21 * RATE); var bufStart = 0
+            fun flush(upTo: Int) {                                       // write samples [bufStart, upTo)
+                val n = (upTo - bufStart).coerceIn(0, buf.size)
+                if (n == 0) return
+                val bytes = ByteArray(n * 2)
+                for (i in 0 until n) { val v = (buf[i].coerceIn(-1f, 1f) * 32767).toInt(); bytes[2 * i] = v.toByte(); bytes[2 * i + 1] = (v shr 8).toByte() }
+                o.write(bytes)
+                System.arraycopy(buf, n, buf, 0, buf.size - n); java.util.Arrays.fill(buf, buf.size - n, buf.size, 0f)
+                bufStart += n
+            }
+            for (j in jobs) {
+                if (j.a + j.len - bufStart > buf.size) flush(j.a)           // nothing earlier than this note can change any more
+                val v = sing(c, j.n.step, j.f, j.len, j.female)
+                val loud = (0.4 + 0.6 * j.n.vel / 112.0).toFloat() * 0.9f  // sing softer in p, louder in f
+                val off = j.a - bufStart
+                for (i in v.indices) { val k = off + i; if (k in buf.indices) buf[k] += v[i] * loud }
+            }
+            flush(min(total, bufStart + buf.size))
+            // pad to the announced length
+            val rest = total - bufStart
+            if (rest > 0) o.write(ByteArray(rest * 2))
+        }
         return true
     }
 

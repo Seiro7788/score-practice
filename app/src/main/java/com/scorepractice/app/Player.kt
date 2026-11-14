@@ -34,11 +34,13 @@ object Timeline {
         val order = order(sc, ch)
         val byMeasure = sc.notes.groupBy { it.measure }
         val dyn = Dynamics.curve(sc)          // loudness from p / f marks and hairpins
+        val acc = Dynamics.accents(sc).groupBy({ it.first }, { it.second })   // sf / fz: louder at that moment
         val spq = 60.0 / bpm; val out = mutableListOf<TNote>(); var t0 = 0.0
         for (mi in order) {
             for (n in byMeasure[mi] ?: emptyList()) {
                 if (ch.hands != 2 && n.hand != ch.hands) continue
-                val v = (Dynamics.at(dyn, mi, n.onset) - if (n.hand == 1) 6 else 0).coerceIn(20, 127)
+                val sfz = if (acc[mi]?.any { kotlin.math.abs(it - n.onset) < 0.13 } == true) 26 else 0
+                val v = (Dynamics.at(dyn, mi, n.onset) - (if (n.hand == 1) 6 else 0) + sfz + n.accent).coerceIn(20, 127)
                 out.add(TNote(t0 + n.onset * spq, n.dur * spq, n.midi, n.step, n.hand, v))
             }
             t0 += sc.measures[mi].length * spq

@@ -77,6 +77,10 @@ class XmlViewActivity : AppCompatActivity() {
         bar.addView(small(hands[data.playHands]) { b -> data.playHands = (data.playHands + 1) % 3; b.text = hands[data.playHands]; saveData(); stop() })
         bar.addView(small(sounds[data.playSound]) { b -> data.playSound = (data.playSound + 1) % 3; b.text = sounds[data.playSound]; saveData(); stop() })
         bar.addView(CheckBox(this).apply {
+            text = "선율"; isChecked = prefs.getBoolean("xmlMelody", true)
+            setOnCheckedChangeListener { _, v -> prefs.edit().putBoolean("xmlMelody", v).apply(); js("melodyOn=$v; drawMelody($v)") }
+        })
+        bar.addView(CheckBox(this).apply {
             text = "셈여림"; isChecked = prefs.getBoolean("xmlDyn", true)
             setOnCheckedChangeListener { _, v -> prefs.edit().putBoolean("xmlDyn", v).apply(); js("toggleDyn($v)") }
         })
@@ -138,12 +142,17 @@ class XmlViewActivity : AppCompatActivity() {
         @JavascriptInterface fun onReady(n: Int) { main.post { status.text = "${n}마디 · 시작할 마디를 누르세요" } }
         @JavascriptInterface fun onError(msg: String) { main.post { status.text = "악보를 그리지 못했습니다: $msg" } }
         @JavascriptInterface fun onMeasure(i: Int) { main.post { tapped(i) } }
+        @JavascriptInterface fun showMelody(): Boolean = prefs.getBoolean("xmlMelody", true)
         @JavascriptInterface fun showDyn(): Boolean = prefs.getBoolean("xmlDyn", true)
         @JavascriptInterface fun dynamics(): String {
             val a = org.json.JSONArray()
             try {
                 for (p in Dynamics.curve(sc)) a.put(org.json.JSONObject().put("m", p.m).put("beat", p.beat).put("v", p.v)
                     .put("L", sc.measures[p.m].length))
+                for ((m, b) in Dynamics.accents(sc)) a.put(org.json.JSONObject().put("m", m).put("beat", b).put("acc", 1).put("L", sc.measures[m].length))
+                for ((s0, e0, cresc) in Dynamics.hairpins(sc)) a.put(org.json.JSONObject().put("m", s0.first).put("beat", s0.second)
+                    .put("m2", e0.first).put("beat2", e0.second).put("pin", if (cresc) 1 else -1)
+                    .put("L", sc.measures[s0.first].length).put("L2", sc.measures[e0.first].length))
             } catch (e: Exception) {}
             return a.toString()
         }
@@ -195,7 +204,7 @@ class XmlViewActivity : AppCompatActivity() {
                     }
                     null
                 }
-            } catch (e: Exception) { e.message ?: e.toString() }
+            } catch (e: Throwable) { if (e is OutOfMemoryError) "곡이 너무 길어 메모리가 모자랍니다. 마디 범위를 줄여 주세요" else (e.message ?: e.toString()) }
             if (err != null) main.post { status.text = err }
         }.start()
     }

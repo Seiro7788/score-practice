@@ -25,7 +25,7 @@ object Dynamics {
                 "crescendo", "diminuendo" -> { wedgeAt = d; wedgeType = d.wedge; keys.add(Triple(T(d.measure, d.pos), level, d.measure to d.pos)) }
                 "stop" -> wedgeAt?.let { w ->
                     val next = ev.drop(i + 1).firstOrNull { it.level != null && it.measure - d.measure <= 1 }
-                    level = next?.level ?: (level + if (wedgeType == "crescendo") 24 else -24).coerceIn(25, 120)
+                    level = next?.level ?: (level + if (wedgeType == "crescendo") 30 else -30).coerceIn(25, 120)
                     keys.add(Triple(T(d.measure, d.pos), level, d.measure to d.pos))
                     ramps.add(T(w.measure, w.pos) to T(d.measure, d.pos)); wedgeAt = null
                 }
@@ -54,6 +54,19 @@ object Dynamics {
             pts.add(Pt(mi, start[mi + 1] - start[mi] - 1e-3, valueAt(start[mi + 1] - 1e-3)))
         }
         return pts
+    }
+
+    /** sf / sfz / fz marks: (measure, beat) */
+    fun accents(sc: XScore): List<Pair<Int, Double>> = sc.dyn.filter { it.accent }.map { it.measure to it.pos }
+
+    /** hairpins as (measure, beat) start / stop pairs with their kind, for drawing "<" ">" */
+    fun hairpins(sc: XScore): List<Triple<Pair<Int, Double>, Pair<Int, Double>, Boolean>> {
+        val out = mutableListOf<Triple<Pair<Int, Double>, Pair<Int, Double>, Boolean>>(); var open: XDyn? = null
+        for (d in sc.dyn) when (d.wedge) {
+            "crescendo", "diminuendo" -> open = d
+            "stop" -> open?.let { o -> out.add(Triple(o.measure to o.pos, d.measure to d.pos, o.wedge == "crescendo")); open = null }
+        }
+        return out
     }
 
     /** velocity at a place in the score (linear between points of the same measure) */

@@ -7,7 +7,7 @@ import java.io.InputStream
 import java.util.zip.ZipInputStream
 
 /** a note from the MusicXML, times in quarter notes from the start of its measure */
-class XNote(val measure: Int, val onset: Double, var dur: Double, val midi: Int, val step: Char, val alter: Int, var hand: Int, val part: Int = 0, val staff: Int = 1)
+class XNote(val measure: Int, val onset: Double, var dur: Double, val midi: Int, val step: Char, val alter: Int, var hand: Int, val part: Int = 0, val staff: Int = 1, val accent: Int = 0)
 
 /** one measure (index in file order) */
 class XMeasure(val number: String, var length: Double = 0.0, var forward: Boolean = false, var backward: Boolean = false,
@@ -15,7 +15,7 @@ class XMeasure(val number: String, var length: Double = 0.0, var forward: Boolea
                var minor: Boolean = false, var beats: Int = 4, var beatType: Int = 4)
 
 /** a dynamic mark (level = MIDI velocity) or a hairpin start/stop ("crescendo", "diminuendo", "stop") */
-class XDyn(val measure: Int, val pos: Double, val level: Int?, val wedge: String?)
+class XDyn(val measure: Int, val pos: Double, val level: Int?, val wedge: String?, val accent: Boolean = false)   // accent = sf / sfz / fz …
 
 class XScore(val measures: List<XMeasure>, val notes: List<XNote>, val tempo: Int = 0, val dyn: List<XDyn> = emptyList()) {   // tempo = first ♩= in the file
     /** play order of measure indices with repeats and 1st/2nd endings unfolded */
@@ -90,13 +90,16 @@ object MusicXml {
                             if (part == 0) measures.add(XMeasure(p.getAttributeValue(null, "number") ?: "${mi + 1}", fifths = fifths,
                                 minor = minorMode, beats = tBeats, beatType = tType))
                         }
-                        "note" -> { inNote = true; isChord = false; isRest = false; isGrace = false; alter = 0; dur = 0.0; staff = 1; tieStop = false; tieStart = false }
+                        "note" -> { noteAccent = 0; inNote = true; isChord = false; isRest = false; isGrace = false; alter = 0; dur = 0.0; staff = 1; tieStop = false; tieStart = false }
                         "chord" -> if (inNote) isChord = true
                         "rest" -> if (inNote) isRest = true
                         "grace" -> if (inNote) isGrace = true
                         "tie" -> if (inNote) { val t = p.getAttributeValue(null, "type"); if (t == "stop") tieStop = true; if (t == "start") tieStart = true }
                         "backup" -> inBackup = true
-                        "direction" -> { inDir = true; dirOffset = 0.0; dirLevel = null; dirWedge = null }
+                        "direction" -> { inDir = true; dirOffset = 0.0; dirLevel = null; dirWedge = null; dirAccent = false }
+                        "sf", "sfz", "sffz", "fz", "rf", "rfz", "sfzp" -> if (inDir) dirAccent = true
+                        "accent" -> if (inNote) noteAccent = maxOf(noteAccent, 12)
+                        "strong-accent" -> if (inNote) noteAccent = maxOf(noteAccent, 20)
                         "ppp", "pp", "p", "mp", "mf", "f", "ff", "fff", "pppp", "ffff", "fp", "sfp" ->
                             if (inDir) dirLevel = LEVELS[p.name]
                         "wedge" -> if (inDir) dirWedge = p.getAttributeValue(null, "type")
@@ -137,9 +140,10 @@ object MusicXml {
                         }
                         "backup" -> inBackup = false
                         "offset" -> if (inDir) dirOffset = (t.toDoubleOrNull() ?: 0.0) / divisions
+                        "other-dynamics" -> if (inDir && Regex("s?f+z|sf|rf").containsMatchIn(t)) dirAccent = true
                         "direction" -> {
                             inDir = false
-                            if (mi >= 0 && (dirLevel != null || dirWedge != null)) dyns.add(XDyn(mi, maxOf(0.0, pos + dirOffset), dirLevel, dirWedge))
+                            if (mi >= 0 && (dirLevel != null || dirWedge != null || dirAccent)) dyns.add(XDyn(mi, maxOf(0.0, pos + dirOffset), dirLevel, dirWedge, dirAccent))
                         }
                         "forward" -> inForward = false
                         "note" -> {
@@ -153,7 +157,7 @@ object MusicXml {
                                     val prev = openTies[midi]
                                     if (tieStop && prev != null) { prev.dur += dur; if (!tieStart) openTies.remove(midi) }
                                     else {
-                                        val n = XNote(mi, start, dur, midi, step, alter, hand, part, staff); notes.add(n)
+                                        val n = XNote(mi, start, dur, midi, step, alter, hand, part, staff, noteAccent); notes.add(n)
                                         if (tieStart) openTies[midi] = n
                                     }
                                 }
@@ -182,6 +186,7 @@ object MusicXml {
     private var pendingEnding: Set<Int> = emptySet()
     private var firstTempo = 0
     private var minorMode = false; private var tBeats = 4; private var tType = 4
+    private var dirAccent = false; private var noteAccent = 0
     private var inDir = false; private var dirOffset = 0.0; private var dirLevel: Int? = null; private var dirWedge: String? = null
     private val dyns = mutableListOf<XDyn>()
     /** dynamic marks as MIDI velocities (accents like sf count as a loud moment) */
