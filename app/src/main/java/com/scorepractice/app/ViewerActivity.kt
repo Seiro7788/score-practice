@@ -397,6 +397,17 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             }
         }
         row.addView(placeBtn, row.childCount - 1)
+        // size of the heads placed by hand (all of them in this score, and the next ones)
+        for ((t, k) in listOf("음표−" to 0.9f, "음표+" to 1.1f)) row.addView(Button(this).apply {
+            text = t; isAllCaps = false; minWidth = 0; minimumWidth = 0
+            setOnClickListener {
+                val man = data.fixes.filter { it.manual }
+                if (man.isEmpty()) { toast("직접 놓은 음표가 없습니다 (빈 곳을 길게 누르면 생깁니다)"); return@setOnClickListener }
+                val all = data.fixes.map { if (it.manual) it.copy(r = it.r * k, rb = it.rb * k) else it }
+                data.fixes.clear(); data.fixes.addAll(all); save(); redraw()
+                fixInfo("직접 놓은 음표 크기 ${if (k > 1) "키움" else "줄임"} (${man.size}개)")
+            }
+        }, row.childCount - 1)
     }
 
     override var fixAreaErase = false
@@ -470,7 +481,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     }
 
     private fun fingerSize(f: Float) {
-        data.fingerScale = (data.fingerScale * f).coerceIn(0.5f, 2.5f); save(); redraw()
+        data.fingerScale = (data.fingerScale * f).coerceIn(0.15f, 2.5f); save(); redraw()
         toast("손번호 크기 ${(data.fingerScale * 100).toInt()}%")
     }
 
@@ -505,8 +516,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         if (fingerClip.isEmpty()) return
         val s0 = data.fingerSize()
         for (g in fingerClip) data.fingers.add(Finger(page, x + g.x, y + g.y, g.n, s0 ?: g.s, data.activeLayer))
-        save(); redraw()
-        toast("손번호 ${fingerClip.size}개를 붙였습니다 — 또 붙이려면 다른 곳을 누르세요 (↶ 되돌리기)")
+        save(); redraw(); chooseFingerTool(0)
+        toast("손번호 ${fingerClip.size}개를 붙였습니다 (↶ 되돌리기) — 또 붙이려면 [붙여넣기]")
     }
 
     private fun refreshFixes() { pages.values.forEach { it.refreshFixes() } }

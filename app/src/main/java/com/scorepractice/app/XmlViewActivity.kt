@@ -406,7 +406,7 @@ class XmlViewActivity : AppCompatActivity() {
     private fun undoF() { val p = fUndo.removeLastOrNull() ?: run { toast("되돌릴 것이 없습니다"); return }; fRedo.addLast(fingersJson()); restoreF(p) }
     private fun redoF() { val p = fRedo.removeLastOrNull() ?: run { toast("다시 할 것이 없습니다"); return }; fUndo.addLast(fingersJson()); restoreF(p) }
 
-    private fun scaleF(f: Float) { data.fingerScale = (data.fingerScale * f).coerceIn(0.5f, 2.5f); Store.saveData(this, score.id, data); updateF() }
+    private fun scaleF(f: Float) { data.fingerScale = (data.fingerScale * f).coerceIn(0.15f, 2.5f); Store.saveData(this, score.id, data); updateF() }
 
     private fun tapFinger(m: Int, t: Double, k: Int) {
         val key = XFinger(m, t, k, 0)

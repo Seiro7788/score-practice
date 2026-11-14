@@ -621,6 +621,8 @@ class PageView(context: Context, private val host: Host) : View(context) {
 
     /** head size (normalized to page width) of the notes already coloured on this page, else from the staff spacing */
     private fun typicalHead(p: Int): Pair<Float, Float> {
+        val man = host.data.fixes.filter { it.manual }
+        if (man.isNotEmpty()) { val rs = man.map { it.r }.sorted(); val rbs = man.map { it.rb }.sorted(); return rs[rs.size / 2] to rbs[rbs.size / 2] }
         val fx = host.data.fixes.filter { it.page == p && !it.manual }
         if (fx.size >= 3) { val rs = fx.map { it.r }.sorted(); val rbs = fx.map { it.rb }.sorted(); return rs[rs.size / 2] to rbs[rbs.size / 2] }
         val o = origs[p] ?: return 0.0085f * 0.66f to 0.0085f * 0.47f
