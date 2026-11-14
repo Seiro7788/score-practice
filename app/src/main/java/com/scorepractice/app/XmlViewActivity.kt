@@ -278,8 +278,8 @@ class XmlViewActivity : AppCompatActivity() {
         fbarWrap.visibility = if (on) android.view.View.VISIBLE else android.view.View.GONE
         fingerBtn.setTextColor(if (on) Color.rgb(200, 30, 30) else Color.BLACK)
         js("setFingerMode($on)")
-        status.text = if (on) "음표를 누른 채 긁기: → 1 · ↗ 2 · ↑ 3 · ↖ 4 · ← 위쪽 5 / 숫자 있는 음표 누르기 = 지우기" else "시작할 마디를 누르세요"
-        if (on) toast("손번호: 음표를 누르고 오른쪽(1)부터 왼쪽 위(5)까지 방향으로 긁으세요. 왼쪽으로 긁으면 끝")
+        status.text = if (on) "음표를 누른 채 긁기 (누르면 방향 안내가 나옵니다) · 숫자 있는 음표를 톡 누르면 지우기" else "시작할 마디를 누르세요"
+        if (on) toast("손번호: PDF와 같은 방식 — 음표를 누르고 오른쪽(1)부터 왼쪽 위(5) 방향으로 긁기, 왼쪽으로 긁으면 끝")
         updateF()
     }
 
@@ -308,7 +308,7 @@ class XmlViewActivity : AppCompatActivity() {
 
     private fun tapFinger(m: Int, t: Double, k: Int) {
         val key = XFinger(m, t, k, 0)
-        if (data.xfingers.none { it.same(key) }) { status.text = "숫자를 넣으려면 음표를 누른 채 긁으세요 (→1 ↗2 ↑3 ↖4 ←위5)"; return }
+        if (data.xfingers.none { it.same(key) }) { status.text = "숫자를 넣으려면 음표를 누른 채 긁으세요 (방향 안내가 나옵니다)"; return }
         val before = fingersJson(); data.xfingers.removeAll { it.same(key) }; changeF(before)
     }
 

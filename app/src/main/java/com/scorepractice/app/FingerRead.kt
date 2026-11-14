@@ -212,7 +212,10 @@ object FingerRead {
                     for (i in mp.indices) colT[i] = mp[i]
                 }
                 val byT = HashMap<Int, MutableList<Digit>>()
+                // a printed 3 between the staves of a measure with triplets is most likely the triplet sign
+                val triplets = ts.any { abs(it * 3 - (it * 3).roundToInt()) < 0.02 && abs(it * 2 - (it * 2).roundToInt()) > 0.1 }
                 for (d in ds) {
+                    if (triplets && d.n == 3 && !d.manual && d.y > pm.staves[0][4] && d.y < pm.staves[1][0]) continue
                     var ti = -1
                     val ci = cols.indices.minByOrNull { abs(cols[it] - d.x) }
                     if (ci != null && abs(cols[ci] - d.x) < 1.5f * sp) ti = colT[ci]
@@ -271,7 +274,7 @@ object FingerRead {
                 if (score > bestScore + 1e-6 || (abs(score - bestScore) < 1e-6 && dist < bestDist)) { bestScore = score; best = src to shift; bestDist = dist }
             }
             val (src, shift) = best ?: continue
-            if (bestScore < 0.7) continue
+            if (bestScore < 0.8) continue
             for (n in tgt) {
                 if (byKey.containsKey(key(mi, n.onset, n.midi))) continue
                 val s = src.firstOrNull { abs(it.onset - n.onset) < 0.01 && it.midi == n.midi - shift } ?: continue
