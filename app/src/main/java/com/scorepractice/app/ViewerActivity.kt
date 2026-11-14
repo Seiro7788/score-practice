@@ -324,7 +324,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         }
         findViewById<Button>(R.id.btnFix).setOnClickListener {
             switchMode(if (mode == PageView.Mode.FIX) PageView.Mode.VIEW else PageView.Mode.FIX)
-            if (mode == PageView.Mode.FIX) toast("색을 고르고 음표를 누르세요 (크기·빈 음표는 자동). 다시 누르면 취소")
+            if (mode == PageView.Mode.FIX) toast("음표를 누르면 고른 색, 누른 채 밀면 방향의 색: ↗♯검은건반 ↖♯흰건반 ↘♭검은건반 ↙♭흰건반 →×검 ←×흰 ↑검정 ↓취소")
         }
         findViewById<Button>(R.id.fixDone).setOnClickListener { switchMode(PageView.Mode.VIEW) }
         // area eraser: drag a box over the page, the colours of the notes inside go
@@ -350,10 +350,21 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         toast("색 ${gone.size}개를 지웠습니다 (↶ 로 되돌리기)")
     }
 
-    override fun onFixTap(page: Int, x: Float, y: Float, head: HeadFix.Head?, w: Int, h: Int) {
+    override val fixPalette: List<Int> get() = FIX_COLORS.map { it.second }
+
+    override fun onFixTap(page: Int, x: Float, y: Float, head: HeadFix.Head?, w: Int, h: Int, color: Int?) {
         // tapping a note that was already fixed removes that fix
         val hit = data.fixes.filter { it.page == page && kotlin.math.abs(it.x - x) < it.r * 1.1f && kotlin.math.abs((it.y - y) * h / w) < it.rb * 1.4f }
             .minByOrNull { kotlin.math.abs(it.x - x) + kotlin.math.abs(it.y - y) }
+        if (color != null) {   // swiped: this colour, replacing any colour the note had
+            if (head == null && hit == null) { fixInfo("음표를 찾지 못했습니다 — 음표 한가운데를 누르고 밀어 주세요"); return }
+            if (hit != null) data.fixes.remove(hit)
+            val f = if (head != null) Fix(page, head.x / w, head.y / h, head.a / w, color, head.hollow, head.b / w)
+                    else hit!!.copy(color = color, auto = false)
+            data.fixes.add(f); save(); pages.values.forEach { it.refreshFixes(page) }
+            fixInfo("밀어서 칠함 (${page + 1}쪽 ${data.fixes.count { it.page == page }}개)")
+            return
+        }
         if (hit != null) { data.fixes.remove(hit); save(); pages.values.forEach { it.refreshFixes(page) }; fixInfo("색을 지웠습니다 (${page + 1}쪽 ${data.fixes.count { it.page == page }}개)"); return }
         if (fixAreaErase) return   // erasing: taps only remove
         if (head == null) { fixInfo("음표를 찾지 못했습니다 — 음표 한가운데를 눌러 주세요"); return }

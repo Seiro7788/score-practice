@@ -57,7 +57,7 @@
         android:layout_height="wrap_content" android:orientation="horizontal"
         android:gravity="center_vertical" android:padding="4dp">
         <TextView android:id="@+id/fixInfo" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="색 고치기: 색을 고른 뒤 음표를 누르세요 " android:paddingStart="8dp" />
+            android:text="누르기 = 고른 색 · 음표를 누르고 밀기 = 방향의 색 " android:paddingStart="8dp" />
         <Button android:id="@+id/fixDone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="완료" />
     </LinearLayout>
     </HorizontalScrollView>

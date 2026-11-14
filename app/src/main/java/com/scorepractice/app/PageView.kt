@@ -39,7 +39,8 @@ class PageView(context: Context, private val host: Host) : View(context) {
         fun onRangeDrawn(page: Int, x0: Float, y0: Float, x1: Float, y1: Float)
         fun onInkChanged()
         fun onZoomChanged(zoomed: Boolean)
-        fun onFixTap(page: Int, x: Float, y: Float, head: HeadFix.Head?, w: Int, h: Int)
+        fun onFixTap(page: Int, x: Float, y: Float, head: HeadFix.Head?, w: Int, h: Int, color: Int? = null)
+        val fixPalette: List<Int>      // black, ♯ black key, ♯ white key, ♭ black key, ♭ white key, × black key, × white key
         fun onFingerAdd(f: Finger)
         fun onFingerRemove(f: Finger)
         fun onFingerMoved(f: Finger)
@@ -326,6 +327,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
         c.restore()
         select(touchSeg)
         drawFingerGuide(c)
+        drawColourGuide(c)
     }
 
     /** fan of the five numbers around the pressed point while swiping */
@@ -446,21 +448,20 @@ class PageView(context: Context, private val host: Host) : View(context) {
                         }
                     }
                 }
-                if (am == MotionEvent.ACTION_UP && !host.fixAreaErase && isFlick(e, 600L)) { host.onFlick(if (e.x < downX) 1 else -1); return true }
+                if (am == MotionEvent.ACTION_DOWN) { cStart = e.x to e.y; cNow = null; invalidate() }
+                if (am == MotionEvent.ACTION_MOVE && !host.fixAreaErase && cStart != null) { cNow = e.x to e.y; invalidate() }
+                if (am == MotionEvent.ACTION_CANCEL) { cStart = null; cNow = null; invalidate() }
+                if (am == MotionEvent.ACTION_UP && !host.fixAreaErase && isFlick(e, 600L)) { cStart = null; cNow = null; invalidate(); host.onFlick(if (e.x < downX) 1 else -1); return true }
+                // press a note and swipe: the direction picks the colour (like fingering)
+                if (am == MotionEvent.ACTION_UP && !host.fixAreaErase && cStart != null && hypot(e.x - downX, e.y - downY) >= 30f) {
+                    val k = colourChoice(e.x - downX, e.y - downY)
+                    cStart = null; cNow = null; invalidate()
+                    if (k >= 0) findHead(downX, downY) { pg, x, y, head, w, h -> host.onFixTap(pg, x, y, head, w, h, host.fixPalette[k]) }
+                    return true
+                }
+                if (am == MotionEvent.ACTION_UP) { cStart = null; cNow = null; invalidate() }
                 if (am == MotionEvent.ACTION_UP && hypot(e.x - downX, e.y - downY) < 20f) {
-                    val o = origs[page]
-                    if (o != null && (!finding || e.eventTime - findingT > 3000)) {
-                        // finding the note head takes a moment on big pages: do it off the screen thread
-                        finding = true; findingT = e.eventTime
-                        val x = nx(e.x); val y = ny(e.y); val pg = page
-                        finder.execute {
-                            val head = try {
-                                val sp = synchronized(sps) { sps.getOrPut(pg) { HeadFix.staffSpace(o) } }
-                                HeadFix.find(o, x * o.width, y * o.height, sp)
-                            } catch (t: Throwable) { null }
-                            mainHandler.post { finding = false; host.onFixTap(pg, x, y, head, o.width, o.height) }
-                        }
-                    }
+                    findHead(e.x, e.y) { pg, x, y, head, w, h -> host.onFixTap(pg, x, y, head, w, h) }
                 }
                 return true
             }
@@ -493,6 +494,59 @@ class PageView(context: Context, private val host: Host) : View(context) {
     private fun isFlick(e: MotionEvent, maxMs: Long): Boolean {
         val dx = e.x - downX; val dy = e.y - downY
         return e.eventTime - downT <= maxMs && abs(dx) > width * 0.28f && abs(dy) < abs(dx) * 0.45f
+    }
+
+    /** find the note head at a screen point off the screen thread, then report it on the screen thread */
+    private fun findHead(sx0: Float, sy0: Float, done: (Int, Float, Float, HeadFix.Head?, Int, Int) -> Unit) {
+        val o = origs[page] ?: return
+        if (finding && android.os.SystemClock.uptimeMillis() - findingT < 3000) return
+        finding = true; findingT = android.os.SystemClock.uptimeMillis()
+        val x = nx(sx0); val y = ny(sy0); val pg = page
+        finder.execute {
+            val head = try {
+                val sp = synchronized(sps) { sps.getOrPut(pg) { HeadFix.staffSpace(o) } }
+                HeadFix.find(o, x * o.width, y * o.height, sp)
+            } catch (t: Throwable) { null }
+            mainHandler.post { finding = false; done(pg, x, y, head, o.width, o.height) }
+        }
+    }
+
+    // colour by swipe: right side = black key, left = white key; up = ♯, down = ♭; sideways = ×;
+    // straight up = black (take the colour off), straight down = cancel
+    private var cStart: Pair<Float, Float>? = null
+    private var cNow: Pair<Float, Float>? = null
+    private val C_ANG = intArrayOf(0, 45, 90, 135, 180, 225, 270, 315)
+    private val C_IDX = intArrayOf(5, 1, 0, 2, 6, 4, -1, 3)   // index into host.fixPalette, -1 = cancel
+    private val C_NAME = arrayOf("×검", "♯검", "검정", "♯흰", "×흰", "♭흰", "취소", "♭검")
+    private fun colourChoice(dx: Float, dy: Float): Int {
+        var a = Math.toDegrees(atan2(-dy.toDouble(), dx.toDouble())).toFloat(); if (a < 0) a += 360f
+        val sector = ((a + 22.5f) / 45f).toInt() % 8
+        return C_IDX[sector]
+    }
+
+    private fun drawColourGuide(c: Canvas) {
+        val s0 = cStart ?: return; val n = cNow ?: return
+        if (host.mode != Mode.FIX || host.fixAreaErase) return
+        val dx = n.first - s0.first; val dy = n.second - s0.second
+        if (hypot(dx, dy) < 30f) return
+        var a = Math.toDegrees(atan2(-dy.toDouble(), dx.toDouble())).toFloat(); if (a < 0) a += 360f
+        val sel = ((a + 22.5f) / 45f).toInt() % 8
+        val R = 125f
+        c.drawCircle(s0.first, s0.second, R + 55f, guideBg)
+        val dot = Paint(Paint.ANTI_ALIAS_FLAG)
+        for (i in 0 until 8) {
+            val rad = Math.toRadians(C_ANG[i].toDouble())
+            val gx = s0.first + (R * cos(rad)).toFloat(); val gy = s0.second - (R * sin(rad)).toFloat()
+            val big = i == sel
+            if (C_IDX[i] >= 0) {
+                dot.style = Paint.Style.FILL; dot.color = host.fixPalette[C_IDX[i]]
+                c.drawCircle(gx, gy, if (big) 34f else 22f, dot)
+                if (big) { dot.style = Paint.Style.STROKE; dot.strokeWidth = 5f; dot.color = Color.rgb(230, 0, 90); c.drawCircle(gx, gy, 38f, dot) }
+            }
+            guide.textSize = if (big) 30f else 22f; guide.color = if (big) Color.rgb(200, 30, 30) else Color.rgb(60, 60, 60)
+            c.drawText(C_NAME[i], gx, gy + (if (C_IDX[i] >= 0) 60f else 8f), guide)
+        }
+        c.drawCircle(s0.first, s0.second, 18f, mark)
     }
 
     private fun penTouch(e: MotionEvent): Boolean {
