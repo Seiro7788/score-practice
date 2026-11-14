@@ -34,6 +34,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
         val erasing: Boolean
         val selectedRange: String?
         fun onDoubleTap(page: Int)
+        fun onTripleTap(r: Range?)   // three quick taps: +1 practice (the range tapped, else the one selected)
         fun onRangeTap(r: Range)
         fun onRangeLongPress(r: Range)
         fun onRangeDrawn(page: Int, x0: Float, y0: Float, x1: Float, y1: Float)
@@ -241,10 +242,29 @@ class PageView(context: Context, private val host: Host) : View(context) {
 
     private val gd = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent) = true
-        override fun onDoubleTap(e: MotionEvent): Boolean { selectAt(e.y); host.onDoubleTap(page); return true }
-        override fun onSingleTapConfirmed(e: MotionEvent): Boolean { selectAt(e.y); hit(e)?.let { host.onRangeTap(it) }; return true }
+        // taps are counted here: 1 = select a range, 2 = double tap, 3 = +1 practice
+        override fun onSingleTapUp(e: MotionEvent): Boolean { countTap(e); return true }
         override fun onLongPress(e: MotionEvent) { selectAt(e.y); if (!multi) hit(e)?.let { host.onRangeLongPress(it) } }
-    })
+    }).apply { setOnDoubleTapListener(null) }
+
+    private var taps = 0; private var tapT = 0L; private var tapX = 0f; private var tapY = 0f
+    private var tapRange: Range? = null
+    private val tapDone = Runnable {
+        val n = taps; taps = 0
+        when {
+            n >= 3 -> host.onTripleTap(tapRange)
+            n == 2 -> host.onDoubleTap(page)
+            n == 1 -> tapRange?.let { host.onRangeTap(it) }
+        }
+    }
+    private fun countTap(e: MotionEvent) {
+        val now = e.eventTime
+        if (taps > 0 && now - tapT < 380 && hypot(e.x - tapX, e.y - tapY) < 90f) taps++
+        else { taps = 1; tapX = e.x; tapY = e.y; selectAt(e.y); tapRange = hit(e) }
+        tapT = now
+        removeCallbacks(tapDone)
+        if (taps >= 3) post(tapDone) else postDelayed(tapDone, 330)
+    }
 
     private fun clamp() {
         if (z <= 1.01f) { z = 1f; tx = 0f; ty = 0f; return }

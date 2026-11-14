@@ -248,21 +248,44 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         redraw()
     }
 
+    /** +1 practice: the record keeps when, where, and the metronome tempo if it was ticking */
+    private fun plusOne(r: Range) {
+        selectedRange = r.id
+        while (r.bpms.size < r.log.size) r.bpms.add(0, 0)
+        val bpm = if (metro.isRunning) metro.bpm else 0
+        r.count++; r.log.add(System.currentTimeMillis()); r.bpms.add(bpm); save(); updatePracticeBar()
+        pager.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+        if (r.count == r.target) toast("목표 ${r.target}회 달성!")
+        else toast("${r.label()} +1  (${r.count}/${r.target}${if (bpm > 0) " · ♩=$bpm" else ""})")
+    }
+
+    private fun minusOne(r: Range) {
+        if (r.count <= 0) return
+        r.count--; if (r.log.isNotEmpty()) r.log.removeAt(r.log.size - 1); if (r.bpms.size > r.log.size) r.bpms.removeAt(r.bpms.size - 1)
+        save(); updatePracticeBar(); toast("${r.label()} −1  (${r.count}/${r.target})")
+    }
+
+    override fun onTripleTap(r: Range?) {
+        if (mode != PageView.Mode.VIEW) return
+        val t = r ?: currentRange() ?: run { toast("이 쪽에 연습 범위가 없습니다 — [범위]로 먼저 만드세요"); return }
+        if (!data.showRanges) { data.showRanges = true }
+        plusOne(t)
+    }
+
+    // volume keys: + / − practice while the practice bar is showing (can be switched off in the menu)
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (prefs.getBoolean("volKeys", true) && practiceBar.visibility == View.VISIBLE && mode == PageView.Mode.VIEW) {
+            val r = currentRange()
+            if (r != null && keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) { plusOne(r); return true }
+            if (r != null && keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) { minusOne(r); return true }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
     private fun setupPractice() {
         practiceBar = findViewById(R.id.practiceBar); rName = findViewById(R.id.rName)
-        findViewById<Button>(R.id.rPlus).setOnClickListener {
-            val r = currentRange() ?: return@setOnClickListener
-            // the record: when, where, and the metronome tempo if it was ticking
-            while (r.bpms.size < r.log.size) r.bpms.add(0, 0)
-            val bpm = if (metro.isRunning) metro.bpm else 0
-            r.count++; r.log.add(System.currentTimeMillis()); r.bpms.add(bpm); save(); updatePracticeBar()
-            if (r.count == r.target) toast("목표 ${r.target}회 달성!")
-            else toast("${r.label()} +1  (${r.count}/${r.target}${if (bpm > 0) " · ♩=$bpm" else ""})")
-        }
-        findViewById<Button>(R.id.rMinus).setOnClickListener {
-            val r = currentRange() ?: return@setOnClickListener
-            if (r.count > 0) { r.count--; if (r.log.isNotEmpty()) r.log.removeAt(r.log.size - 1); if (r.bpms.size > r.log.size) r.bpms.removeAt(r.bpms.size - 1); save(); updatePracticeBar() }
-        }
+        findViewById<Button>(R.id.rPlus).setOnClickListener { currentRange()?.let { plusOne(it) } }
+        findViewById<Button>(R.id.rMinus).setOnClickListener { currentRange()?.let { minusOne(it) } }
         val step = { d: Int ->
             val rs = pageRanges()
             if (rs.isNotEmpty()) {
@@ -715,7 +738,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private fun menuDialog() {
         val dir = if (prefs.getBoolean("swipeRightNext", false)) "지금: 오른쪽으로 밀면 다음 쪽" else "지금: 왼쪽으로 밀면 다음 쪽"
         AlertDialog.Builder(this).setItems(arrayOf("연습 기록", "PDF로 저장", "쪽 이동", "넘김 방향 바꾸기 ($dir)", "이 쪽 필기 모두 지우기",
-            if (half) "반 페이지 넘김 끄기" else "반 페이지 넘김 켜기", "원본 PDF 바꾸기")) { _, w ->
+            if (half) "반 페이지 넘김 끄기" else "반 페이지 넘김 켜기", "원본 PDF 바꾸기",
+            if (prefs.getBoolean("volKeys", true)) "볼륨 버튼으로 +1/−1 끄기" else "볼륨 버튼으로 +1/−1 켜기")) { _, w ->
             when (w) {
                 0 -> openRecord()
                 1 -> exportDialog()
@@ -725,6 +749,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                     }.show() }
                 5 -> setHalf(!half)
                 6 -> pickNewPdf.launch(arrayOf("application/pdf"))
+                7 -> { val v = !prefs.getBoolean("volKeys", true); prefs.edit().putBoolean("volKeys", v).apply()
+                    toast(if (v) "연습 바가 보일 때 볼륨 ▲ = +1, ▼ = −1" else "볼륨 버튼은 원래대로 소리 크기") }
                 3 -> { prefs.edit().putBoolean("swipeRightNext", !prefs.getBoolean("swipeRightNext", false)).apply(); applyDirection() }
                 4 -> { val p = primaryPage(pager.currentItem)
                     AlertDialog.Builder(this).setMessage("${p + 1}쪽의 필기를 모두 지울까요?").setPositiveButton("지우기") { _, _ ->
