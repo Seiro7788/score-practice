@@ -3,6 +3,7 @@ package com.scorepractice.app
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import org.json.JSONArray
 import java.io.File
@@ -116,47 +117,91 @@ object Backup {
     }
 
     // ---------- phone folder mirror
-    private fun dir(c: Context): DocumentFile? {
-        val u = folder(c) ?: return null
-        val root = DocumentFile.fromTreeUri(c, u) ?: return null
-        return if (root.canWrite()) root else null
+    // Works through DocumentsContract with the folder ids remembered: cloud folders (Google Drive …) list a new
+    // folder only after a delay, so looking it up by name again would create "scores" over and over.
+    private class Child(val id: String, val name: String, val size: Long, val dir: Boolean)
+
+    private fun children(c: Context, tree: Uri, parentId: String): List<Child> {
+        val out = mutableListOf<Child>()
+        val q = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId)
+        c.contentResolver.query(q, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_SIZE, DocumentsContract.Document.COLUMN_MIME_TYPE), null, null, null)?.use { cu ->
+            while (cu.moveToNext()) out.add(Child(cu.getString(0), cu.getString(1) ?: "", if (cu.isNull(2)) -1 else cu.getLong(2),
+                cu.getString(3) == DocumentsContract.Document.MIME_TYPE_DIR))
+        }
+        return out
     }
 
-    private fun child(parent: DocumentFile, name: String, mime: String): DocumentFile? =
-        parent.findFile(name) ?: parent.createFile(mime, name)
+    private fun exists(c: Context, tree: Uri, id: String): Boolean = try {
+        c.contentResolver.query(DocumentsContract.buildDocumentUriUsingTree(tree, id), arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID), null, null, null)?.use { it.moveToFirst() } ?: false
+    } catch (e: Exception) { false }
+
+    private val SCORES = Regex("^scores( \\(\\d+\\))?$")
+
+    /** the one "scores" folder: remembered id → existing folder (the fullest one; empty duplicates are removed) → new */
+    private fun scoresDir(c: Context, tree: Uri, rootId: String, kids: List<Child>): String? {
+        val p = c.getSharedPreferences(PREF, Context.MODE_PRIVATE); val key = "scoresDir_$tree"
+        p.getString(key, null)?.let { if (exists(c, tree, it)) { cleanDuplicates(c, tree, kids, it); return it } }
+        val dirs = kids.filter { it.dir && SCORES.matches(it.name) }
+        val pick = dirs.maxByOrNull { children(c, tree, it.id).size }?.id
+            ?: DocumentsContract.createDocument(c.contentResolver, DocumentsContract.buildDocumentUriUsingTree(tree, rootId), DocumentsContract.Document.MIME_TYPE_DIR, "scores")
+                ?.let { DocumentsContract.getDocumentId(it) } ?: return null
+        p.edit().putString(key, pick).apply()
+        cleanDuplicates(c, tree, kids, pick)
+        return pick
+    }
+
+    private fun cleanDuplicates(c: Context, tree: Uri, kids: List<Child>, keep: String) {
+        for (d in kids) if (d.dir && d.id != keep && SCORES.matches(d.name) && children(c, tree, d.id).isEmpty())
+            try { DocumentsContract.deleteDocument(c.contentResolver, DocumentsContract.buildDocumentUriUsingTree(tree, d.id)) } catch (_: Exception) {}
+    }
+
+    private fun write(c: Context, tree: Uri, parentId: String, have: Map<String, Child>, name: String, mime: String, f: File) {
+        val uri = have[name]?.let { DocumentsContract.buildDocumentUriUsingTree(tree, it.id) }
+            ?: DocumentsContract.createDocument(c.contentResolver, DocumentsContract.buildDocumentUriUsingTree(tree, parentId), mime, name) ?: return
+        c.contentResolver.openOutputStream(uri, "wt")?.use { o -> f.inputStream().use { it.copyTo(o) } }
+    }
+
+    private val syncLock = Any()
 
     /** copy the library to the chosen folder (PDFs only when missing, data every time) */
-    fun sync(c: Context): Boolean {
-        val root = dir(c) ?: return false
-        return try {
-            val sd = root.findFile("scores") ?: root.createDirectory("scores") ?: return false
+    fun sync(c: Context): Boolean = synchronized(syncLock) {
+        val tree = folder(c) ?: return false
+        try {
+            val rootId = DocumentsContract.getTreeDocumentId(tree)
+            val kids = children(c, tree, rootId)
+            val sdId = scoresDir(c, tree, rootId, kids) ?: return false
+            val have = children(c, tree, sdId).associateBy { it.name }
             val keep = mutableSetOf<String>()
             for ((name, f) in localFiles(c)) {
-                if (name == "library.json") {
-                    child(root, "library.json", "application/json")?.let { d -> c.contentResolver.openOutputStream(d.uri, "wt")?.use { o -> f.inputStream().use { it.copyTo(o) } } }
-                    continue
-                }
+                if (name == "library.json") { write(c, tree, rootId, kids.filter { !it.dir }.associateBy { it.name }, "library.json", "application/json", f); continue }
                 val short = name.removePrefix("scores/"); keep.add(short)
                 val isPdf = short.endsWith(".pdf")
-                val existing = sd.findFile(short)
-                if (isPdf && existing != null && existing.length() == f.length()) continue
-                val d = existing ?: sd.createFile(if (isPdf) "application/pdf" else if (short.endsWith(".json")) "application/json" else "application/octet-stream", short) ?: continue
-                c.contentResolver.openOutputStream(d.uri, "wt")?.use { o -> f.inputStream().use { it.copyTo(o) } }
+                if (isPdf && have[short]?.size == f.length()) continue
+                write(c, tree, sdId, have, short, if (isPdf) "application/pdf" else if (short.endsWith(".json")) "application/json" else "application/octet-stream", f)
             }
-            sd.listFiles().forEach { if (it.name != null && it.name !in keep) it.delete() }  // scores deleted on the phone
+            for ((n, ch) in have) if (n !in keep && !ch.dir)   // scores deleted on the phone
+                try { DocumentsContract.deleteDocument(c.contentResolver, DocumentsContract.buildDocumentUriUsingTree(tree, ch.id)) } catch (_: Exception) {}
             true
         } catch (e: Exception) { false }
     }
 
+    /** cloud folders (Google Drive …) are slow and unreliable as a live mirror */
+    fun isCloud(uri: Uri): Boolean = uri.authority?.let { it.contains("google.android.apps.docs") || it.contains("onedrive") || it.contains("dropbox") } ?: false
+
     /** true when the chosen folder already holds a library (e.g. after reinstalling) */
-    fun folderHasLibrary(c: Context, uri: Uri): Boolean =
-        DocumentFile.fromTreeUri(c, uri)?.findFile("library.json") != null
+    fun folderHasLibrary(c: Context, uri: Uri): Boolean = try {
+        children(c, uri, DocumentsContract.getTreeDocumentId(uri)).any { !it.dir && it.name == "library.json" }
+    } catch (e: Exception) { false }
 
     fun importFromFolder(c: Context, uri: Uri): Int {
-        val root = DocumentFile.fromTreeUri(c, uri) ?: return 0
-        val lib = root.findFile("library.json") ?: return 0
-        val text = c.contentResolver.openInputStream(lib.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
-        val sd = root.findFile("scores")
-        return mergeFrom(c, text, null) { name -> sd?.findFile(name)?.let { c.contentResolver.openInputStream(it.uri) } }
+        val rootId = DocumentsContract.getTreeDocumentId(uri)
+        val kids = children(c, uri, rootId)
+        val lib = kids.firstOrNull { !it.dir && it.name == "library.json" } ?: return 0
+        val text = c.contentResolver.openInputStream(DocumentsContract.buildDocumentUriUsingTree(uri, lib.id))?.use { it.readBytes().toString(Charsets.UTF_8) }
+        // every "scores" folder (a cloud folder may hold duplicates): a file is taken from whichever has it
+        val files = HashMap<String, String>()
+        for (d in kids.filter { it.dir && SCORES.matches(it.name) }) for (ch in children(c, uri, d.id)) if (!ch.dir && ch.size != 0L) files.putIfAbsent(ch.name, ch.id)
+        return mergeFrom(c, text, null) { name -> files[name]?.let { c.contentResolver.openInputStream(DocumentsContract.buildDocumentUriUsingTree(uri, it)) } }
     }
 }

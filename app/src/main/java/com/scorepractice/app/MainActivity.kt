@@ -45,8 +45,14 @@ class MainActivity : AppCompatActivity() {
     private val makeBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         if (uri != null) background("백업 만드는 중…") {
             val ids = backupIds
-            contentResolver.openOutputStream(uri)!!.use { Backup.writeZip(this, it, ids) }
-            "백업 파일을 저장했습니다 (악보 ${ids?.size ?: Store.loadLibrary(this).size}개)"
+            contentResolver.openOutputStream(uri, "wt")!!.use { Backup.writeZip(this, it, ids); it.flush() }
+            val size = try { contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else -1L } ?: -1L } catch (e: Exception) { -1L }
+            val n = ids?.size ?: Store.loadLibrary(this).size
+            when {
+                size == 0L -> "백업 파일이 비어 있습니다. 다시 저장해 주세요"
+                Backup.isCloud(uri) -> "백업 파일을 저장했습니다 (악보 ${n}개${if (size > 0) ", " + size / 1024 / 1024 + "MB" else ""}).\n구글드라이브 앱이 인터넷에 연결되면 올립니다 — 드라이브 앱에서 '업로드 중'이 끝났는지 확인하세요"
+                else -> "백업 파일을 저장했습니다 (악보 ${n}개${if (size > 0) ", " + size / 1024 / 1024 + "MB" else ""})"
+            }
         }
     }
     private val loadBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -106,6 +112,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun chooseFolder(uri: Uri) {
+        if (Backup.isCloud(uri)) {
+            AlertDialog.Builder(this).setTitle("구글드라이브 폴더")
+                .setMessage("저장 폴더는 악보를 바꿀 때마다 자동으로 복사하는 곳이라, 구글드라이브 같은 클라우드 폴더에서는 느리고 업로드가 빠지기도 합니다.\n\n휴대폰 안의 폴더(예: Documents)를 저장 폴더로 쓰고, 구글드라이브에는 '백업 파일 만들기'로 올리는 것을 권합니다.")
+                .setPositiveButton("그래도 이 폴더 쓰기") { _, _ -> useFolder(uri) }
+                .setNegativeButton("다른 폴더 고르기") { _, _ -> pickFolder.launch(null) }.show()
+            return
+        }
+        useFolder(uri)
+    }
+
+    private fun useFolder(uri: Uri) {
         try { Backup.setFolder(this, uri) } catch (e: Exception) { Toast.makeText(this, "이 폴더는 쓸 수 없습니다", Toast.LENGTH_LONG).show(); return }
         if (Backup.folderHasLibrary(this, uri))
             AlertDialog.Builder(this).setTitle("저장 폴더").setMessage("이 폴더에 전에 저장한 악보가 있습니다. 불러올까요?")
