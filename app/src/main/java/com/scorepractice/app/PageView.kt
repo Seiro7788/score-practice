@@ -75,9 +75,10 @@ class PageView(context: Context, private val host: Host) : View(context) {
 
     private val bakedKey = mutableMapOf<Int, Int>()
 
-    fun refreshFixes() { bakedKey.clear(); shown.clear(); invalidate() }
+    // the prepared page bitmap is kept and repainted in place (a new 15 MB bitmap per tap ran the phone out of memory)
+    fun refreshFixes() { bakedKey.clear(); invalidate() }
     /** only this page's colours changed */
-    fun refreshFixes(p: Int) { if (bakedKey.remove(p) != null || shown.remove(p) != null) invalidate() }
+    fun refreshFixes(p: Int) { if (bakedKey.remove(p) != null) invalidate() }
 
     /** one colour fix added: paint just that note on the page already prepared instead of rebuilding the page */
     fun fixAdded(f: Fix) {
@@ -105,7 +106,10 @@ class PageView(context: Context, private val host: Host) : View(context) {
         val key = keyOf(p)
         val have = shown[p]
         if (have != null && bakedKey[p] == key) return have
-        val bm = if (fx.isEmpty() && hi.isEmpty()) o else o.copy(Bitmap.Config.ARGB_8888, true).also { bm ->
+        val reuse = have?.takeIf { it !== o && it.isMutable && !it.isRecycled && it.width == o.width && it.height == o.height }
+        val bm = if (fx.isEmpty() && hi.isEmpty()) o else (reuse?.also { b ->
+            android.graphics.Canvas(b).drawBitmap(o, 0f, 0f, Paint().apply { xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC) })
+        } ?: o.copy(Bitmap.Config.ARGB_8888, true)).also { bm ->
             for (f in fx) HeadFix.apply(bm, f.x * bm.width, f.y * bm.height, f.r * bm.width, f.rb * bm.width, f.hollow, f.color)
             Highlight.bake(bm, hi)
         }
