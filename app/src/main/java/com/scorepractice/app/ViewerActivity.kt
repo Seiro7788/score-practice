@@ -363,6 +363,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         fixBar = findViewById(R.id.fixBar)
         val row = findViewById<LinearLayout>(R.id.fixRow)
         val btns = mutableListOf<View>()
+        selectFixColor = { col -> fixColor = col; btns.forEachIndexed { j, o -> mark(o, FIX_COLORS[j].second, FIX_COLORS[j].second == col) } }
         FIX_COLORS.forEachIndexed { i, (_, col, _) ->
             val b = swatch(col, i == 0)
             b.setOnClickListener {
@@ -373,7 +374,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         }
         findViewById<Button>(R.id.btnFix).setOnClickListener {
             switchMode(if (mode == PageView.Mode.FIX) PageView.Mode.VIEW else PageView.Mode.FIX)
-            if (mode == PageView.Mode.FIX) toast("누르기 = 고른 색 · 누른 채 밀기 = 방향의 색 · 빈 곳을 길게 누르기 = 2분음표가 생기고 밀어서 색 고르기 · 색 음표를 길게 눌러 끌기 = 옮기기")
+            if (mode == PageView.Mode.FIX) toast("누르기 = 고른 색 · 누른 채 밀기 = 방향의 색 · 빈 곳 길게 누르기 = 2분음표 · 직접 놓은 음표 두 번 누르기 = 옮기기 · 빈 곳 세 번 누르기 = 끝")
         }
         findViewById<Button>(R.id.fixDone).setOnClickListener { switchMode(PageView.Mode.VIEW) }
         // area eraser: drag a box over the page, the colours of the notes inside go
@@ -411,10 +412,15 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     }
 
     override var fixAreaErase = false
+    private var selectFixColor: (Int) -> Unit = {}
+
+    override fun onFixExit() { switchMode(PageView.Mode.VIEW); toast("색 고치기 끝") }
+    override fun onFixInfo(t: String) = fixInfo(t)
     override var fixPlace = 0
     private lateinit var placeBtn: Button
 
     override fun onFixPlace(page: Int, x: Float, y: Float, r: Float, rb: Float, hollow: Boolean, color: Int?) {
+        color?.let { selectFixColor(it) }
         data.fixes.add(Fix(page, x, y, r, color ?: fixColor, hollow, rb, manual = true)); save(); redraw()
         fixInfo("${if (hollow) "빈 음표(2분)" else "찬 음표(4분)"}를 놓았습니다 — 꾹 눌러 끌면 옮겨집니다")
     }
@@ -439,7 +445,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         // tapping a note that was already fixed removes that fix
         val hit = data.fixes.filter { it.page == page && kotlin.math.abs(it.x - x) < it.r * 1.1f && kotlin.math.abs((it.y - y) * h / w) < it.rb * 1.4f }
             .minByOrNull { kotlin.math.abs(it.x - x) + kotlin.math.abs(it.y - y) }
-        if (color != null) {   // swiped: this colour, replacing any colour the note had
+        if (color != null) {   // swiped: this colour, replacing any colour the note had (and it becomes the chosen colour above)
+            selectFixColor(color)
             if (head == null && hit == null) { fixInfo("음표를 찾지 못했습니다 — 음표 한가운데를 누르고 밀어 주세요"); return }
             if (hit != null) data.fixes.remove(hit)
             val f = if (head != null) Fix(page, head.x / w, head.y / h, head.a / w, color, head.hollow, head.b / w)

@@ -44,6 +44,8 @@ class PageView(context: Context, private val host: Host) : View(context) {
         val fixPlace: Int              // long press on an empty spot places: 0 = a hollow head (half note), 1 = a filled head (quarter)
         fun onFixPlace(page: Int, x: Float, y: Float, r: Float, rb: Float, hollow: Boolean, color: Int?)
         fun onFixMoved(old: Fix, x: Float, y: Float)
+        fun onFixExit()
+        fun onFixInfo(t: String)
         val fixPalette: List<Int>      // black, ♯ black key, ♯ white key, ♭ black key, ♭ white key, × black key, × white key
         fun onFingerAdd(f: Finger)
         fun onFingerRemove(f: Finger)
@@ -324,6 +326,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
             val k = if (n != null && s0 != null && hypot(n.first - s0.first, n.second - s0.second) >= 30f) colourChoice(n.first - s0.first, n.second - s0.second) else -2
             val col = if (k >= 0) host.fixPalette[k] else Color.argb(160, 120, 120, 120)
             HeadFix.drawManual(c, sx(pl.first), sy(pl.second), r * dst.width(), rb * dst.width(), host.fixPlace != 1, col) } }
+        armed?.let { a -> if (a.page == segs[i].page) { mark.strokeWidth = 3f / z; c.drawCircle(sx(a.x), sy(a.y), a.r * dst.width() * 1.8f, mark); mark.strokeWidth = 3f } }
         moving?.let { mv -> val p0 = movePos; if (mv.page == segs[i].page && p0 != null) {
             HeadFix.drawManual(c, sx(p0.first), sy(p0.second), mv.r * dst.width(), mv.rb * dst.width(), mv.hollow, mv.color)
             mark.strokeWidth = 3f / z; c.drawCircle(sx(p0.first), sy(p0.second), mv.r * dst.width() * 1.6f, mark); mark.strokeWidth = 3f } }
@@ -526,7 +529,10 @@ class PageView(context: Context, private val host: Host) : View(context) {
                     }
                 }
                 // hold a coloured note still for a moment = pick it up, then drag it where it belongs
-                if (am == MotionEvent.ACTION_DOWN && !host.fixAreaErase) {
+                if (am == MotionEvent.ACTION_DOWN && !host.fixAreaErase && armed != null) {
+                    // after a double tap on a hand-placed head: this drag moves it
+                    val a = armed!!; armed = null; moving = a; movePos = a.x to a.y; cStart = null; cNow = null
+                } else if (am == MotionEvent.ACTION_DOWN && !host.fixAreaErase) {
                     moving = null; movePos = null
                     val x = nx(e.x); val y = ny(e.y)
                     val near = host.data.fixes.filter { it.page == page && abs(it.x - x) < it.r * 1.4f && abs((it.y - y) * dst.height() / dst.width()) < it.rb * 1.8f }
@@ -578,8 +584,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
                     return true
                 }
                 if (am == MotionEvent.ACTION_UP) { cStart = null; cNow = null; invalidate() }
-                if (am == MotionEvent.ACTION_UP && hypot(e.x - downX, e.y - downY) < 20f)
-                    findHead(e.x, e.y) { pg, x, y, head, w, h -> host.onFixTap(pg, x, y, head, w, h) }
+                if (am == MotionEvent.ACTION_UP && hypot(e.x - downX, e.y - downY) < 20f) fixTapCount(e)
                 return true
             }
             Mode.RANGE -> {
@@ -613,6 +618,27 @@ class PageView(context: Context, private val host: Host) : View(context) {
         return e.eventTime - downT <= maxMs && abs(dx) > width * 0.28f && abs(dy) < abs(dx) * 0.45f
     }
 
+    private var armed: Fix? = null          // double-tapped hand-placed head, waiting to be dragged
+    private var fTaps = 0; private var fTapT = 0L; private var fTapX = 0f; private var fTapY = 0f
+    private val fTapDone = Runnable {
+        val n = fTaps; fTaps = 0
+        val x = nx(fTapX); val y = ny(fTapY)
+        val near = host.data.fixes.filter { it.page == page && abs(it.x - x) < it.r * 1.4f && abs((it.y - y) * dst.height() / dst.width()) < it.rb * 1.8f }
+            .minByOrNull { abs(it.x - x) + abs(it.y - y) }
+        when {
+            n >= 3 && near == null -> host.onFixExit()                         // three taps on an empty spot: done
+            n == 2 && near != null && near.manual -> { armed = near; invalidate()
+                host.onFixInfo("옮길 음표를 골랐습니다 — 끌어서 놓으세요") }
+            else -> findHead(fTapX, fTapY) { pg, xx, yy, head, w, h -> host.onFixTap(pg, xx, yy, head, w, h) }
+        }
+    }
+    private fun fixTapCount(e: MotionEvent) {
+        if (fTaps > 0 && e.eventTime - fTapT < 380 && hypot(e.x - fTapX, e.y - fTapY) < 90f) fTaps++
+        else { fTaps = 1; fTapX = e.x; fTapY = e.y }
+        fTapT = e.eventTime
+        removeCallbacks(fTapDone)
+        if (fTaps >= 3) post(fTapDone) else postDelayed(fTapDone, 330)
+    }
     private var moving: Fix? = null
     private var placing: Pair<Float, Float>? = null
     private var movePos: Pair<Float, Float>? = null
