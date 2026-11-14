@@ -41,6 +41,14 @@ data class Fix(val page: Int, val x: Float, val y: Float, val r: Float, val colo
 /** fingering number placed by the user: centre (normalized), s = staff spacing / page width at that time */
 data class Finger(val page: Int, var x: Float, var y: Float, val n: Int, val s: Float)
 
+/** fingering on a note of the attached MusicXML: measure index (file order), onset in quarters within the measure,
+ *  MIDI pitch, finger 1..5. p = only proposed (read from the PDF / copied from a similar passage), not yet accepted */
+data class XFinger(val m: Int, val t: Double, val k: Int, var n: Int, var p: Boolean = false) {
+    fun same(o: XFinger) = m == o.m && k == o.k && kotlin.math.abs(t - o.t) < 0.01
+    fun toJson(): JSONObject = JSONObject().put("m", m).put("t", t).put("k", k).put("n", n).put("p", p)
+    companion object { fun of(g: JSONObject) = XFinger(g.getInt("m"), g.getDouble("t"), g.getInt("k"), g.getInt("n"), g.optBoolean("p")) }
+}
+
 /** handwriting stroke, normalized coordinates */
 data class Stroke(val page: Int, val color: Int, val width: Float, val pts: FloatArray, val layer: String = "")   // layer "" = not in a layer
 
@@ -52,6 +60,7 @@ class ScoreData {
     var showFixes = true
     val fingers = mutableListOf<Finger>()
     var showFingers = true
+    val xfingers = mutableListOf<XFinger>()
     var activeLayer: String = ""
     var showInk = true
     var lastPage = 0
@@ -147,6 +156,7 @@ object Store {
                     g.getInt("n"), g.getDouble("s").toFloat()))
             }
             d.showFingers = o.optBoolean("showFingers", true)
+            o.optJSONArray("xfingers")?.let { xa -> for (i in 0 until xa.length()) d.xfingers.add(XFinger.of(xa.getJSONObject(i))) }
             d.activeLayer = o.optString("activeLayer")
             d.showInk = o.optBoolean("showInk", true)
             d.lastPage = o.optInt("lastPage", 0)
@@ -197,6 +207,7 @@ object Store {
             }
         })
         o.put("showFingers", d.showFingers)
+        o.put("xfingers", JSONArray().apply { d.xfingers.forEach { put(it.toJson()) } })
         o.put("activeLayer", d.activeLayer).put("showInk", d.showInk).put("lastPage", d.lastPage)
         o.put("bpm", d.bpm).put("xmlBpm", d.xmlBpm).put("beats", d.beats).put("fingerScale", d.fingerScale.toDouble()).put("playHands", d.playHands).put("playSound", d.playSound).put("keySig", d.keySig).put("lowerTreble", d.lowerTreble)
         return o

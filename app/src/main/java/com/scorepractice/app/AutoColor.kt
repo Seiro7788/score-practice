@@ -25,7 +25,7 @@ object AutoColor {
     class Result(val fixes: List<Fix>, val staves: Int, val heads: Int, val coloured: Int)
 
     // ---------- helpers
-    private class Mask(val w: Int, val h: Int, val a: BooleanArray) {
+    internal class Mask(val w: Int, val h: Int, val a: BooleanArray) {
         operator fun get(x: Int, y: Int) = x in 0 until w && y in 0 until h && a[y * w + x]
         val sum: IntArray by lazy {   // integral image (w+1) x (h+1)
             val s = IntArray((w + 1) * (h + 1))
@@ -39,16 +39,21 @@ object AutoColor {
         }
     }
 
-    private fun lum(c: Int) = (Color.red(c) * 3 + Color.green(c) * 6 + Color.blue(c)) / 10
+    internal fun lum(c: Int) = (Color.red(c) * 3 + Color.green(c) * 6 + Color.blue(c)) / 10
 
     // ---------- staves
-    private fun findStaves(ink: Mask): Pair<List<FloatArray>, Float> {
+    internal fun findStaves(ink: Mask): Pair<List<FloatArray>, Float> {
         val w = ink.w; val h = ink.h; val prof = FloatArray(h)
         for (y in 0 until h) { var n = 0; for (x in w / 10 until w * 9 / 10) if (ink.a[y * w + x]) n++; prof[y] = n / (w * 0.8f) }
-        val lines = mutableListOf<Float>(); var y = 0
+        val lines = mutableListOf<Float>(); val runs = mutableListOf<Pair<Int, Int>>(); var y = 0
         while (y < h) {
-            if (prof[y] > 0.45f) { val y0 = y; while (y < h && prof[y] > 0.45f) y++; lines.add((y0 + y - 1) / 2f) } else y++
+            if (prof[y] > 0.45f) {
+                val y0 = y; while (y < h && prof[y] > 0.45f) y++
+                // a thick or slightly tilted line can break into two runs a pixel or two apart: one line
+                if (runs.isNotEmpty() && y0 - runs.last().second <= 3) runs[runs.size - 1] = runs.last().first to (y - 1) else runs.add(y0 to (y - 1))
+            } else y++
         }
+        for ((a, b) in runs) lines.add((a + b) / 2f)
         val gaps = lines.zipWithNext { a, b -> b - a }.filter { it > 4 && it < h / 20f }.sorted()
         val sp = if (gaps.isEmpty()) w * 0.0085f else gaps[gaps.size / 2]
         val staves = mutableListOf<FloatArray>(); var i = 0
@@ -60,7 +65,7 @@ object AutoColor {
     }
 
     /** removes thin horizontal staff-line pixels (keeps pixels that belong to something above/below) */
-    private fun removeLines(ink: Mask, staves: List<FloatArray>, sp: Float): Mask {
+    internal fun removeLines(ink: Mask, staves: List<FloatArray>, sp: Float): Mask {
         val a = ink.a.copyOf(); val w = ink.w
         val t = max(1, (sp * 0.12f).roundToInt())
         for (st in staves) for (ly in st) {
@@ -76,7 +81,7 @@ object AutoColor {
     private const val ANG = -0.35
     private val C = kotlin.math.cos(ANG); private val S = kotlin.math.sin(ANG)
 
-    private fun ellipseScore(m: Mask, cx: Float, cy: Float, a: Float, b: Float): Triple<Float, Float, Float> {
+    internal fun ellipseScore(m: Mask, cx: Float, cy: Float, a: Float, b: Float): Triple<Float, Float, Float> {
         var nF = 0; var inF = 0; var nR = 0; var inR = 0; var nC = 0; var inC = 0
         val ia = (a * 1.15f).toInt() + 1
         for (yy in (cy - ia).toInt()..(cy + ia).toInt()) for (xx in (cx - ia).toInt()..(cx + ia).toInt()) {
@@ -91,7 +96,7 @@ object AutoColor {
         return Triple(if (nF > 0) inF.toFloat() / nF else 0f, if (nR > 0) inR.toFloat() / nR else 0f, if (nC > 0) inC.toFloat() / nC else 1f)
     }
 
-    private fun findHeads(m: Mask, staves: List<Staff>, sp: Float, left: IntArray): List<Head> {
+    internal fun findHeads(m: Mask, staves: List<Staff>, sp: Float, left: IntArray): List<Head> {
         val a = 0.62f * sp; val b = 0.45f * sp
         val bw = (0.5f * sp).toInt(); val bh = (0.3f * sp).toInt()
         val out = mutableListOf<Head>()
@@ -180,7 +185,7 @@ object AutoColor {
     }
 
     // ---------- barlines
-    private fun barlines(m: Mask, sys: List<Staff>, sp: Float): List<Float> {
+    internal fun barlines(m: Mask, sys: List<Staff>, sp: Float): List<Float> {
         val y0 = sys.first().top.toInt(); val y1 = sys.last().bottom.toInt()
         val cov = FloatArray(m.w) { x -> var n = 0; for (y in y0..y1) if (m[x, y]) n++; n.toFloat() / (y1 - y0 + 1) }
         val xs = mutableListOf<Float>(); var x = 0

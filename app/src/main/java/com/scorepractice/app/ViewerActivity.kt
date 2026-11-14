@@ -179,8 +179,14 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     private fun pen(c: Int, w: Float) { penColor = c; penWidth = w; erasing = false }
 
+    /** undo / redo only while editing (pen, colour fix, fingering, ranges): avoids accidental taps while reading */
+    private fun updateUndoBox() {
+        findViewById<View>(R.id.undoBox).visibility = if (mode != PageView.Mode.VIEW && !immersive) View.VISIBLE else View.GONE
+    }
+
     private fun switchMode(m: PageView.Mode) {
         mode = m
+        updateUndoBox()
         pager.isUserInputEnabled = m == PageView.Mode.VIEW
         penBar.visibility = if (m == PageView.Mode.PEN) View.VISIBLE else View.GONE
         fixBar.visibility = if (m == PageView.Mode.FIX) View.VISIBLE else View.GONE
@@ -470,7 +476,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         immersive = on
         val vis = if (on) View.GONE else View.VISIBLE
         findViewById<View>(R.id.bar).visibility = vis
-        findViewById<View>(R.id.undoBox).visibility = vis
+        updateUndoBox()
         if (on) { metroWasOpen = metroBar.visibility == View.VISIBLE; metroBar.visibility = View.GONE; practiceBar.visibility = View.GONE }
         else { if (metroWasOpen) metroBar.visibility = View.VISIBLE; updatePracticeBar() }
         val ctl = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
@@ -681,7 +687,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private val redoStack = ArrayDeque<String>()
 
     /** snapshot without view-only state (page, visibility toggles don't count as edits) */
-    private fun snapshot(): String = Store.toJson(data).apply { remove("lastPage"); remove("bpm"); remove("beats"); remove("xmlBpm") }.toString()
+    private fun snapshot(): String = Store.toJson(data).apply { remove("lastPage"); remove("bpm"); remove("beats"); remove("xmlBpm"); remove("xfingers") }.toString()
 
     private fun save() {
         val now = snapshot()
@@ -693,8 +699,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     }
 
     private fun restore(json: String) {
-        val page = data.lastPage; val bpm = data.bpm; val beats = data.beats; val xb = data.xmlBpm
-        data = Store.parse(json); data.lastPage = page; data.bpm = bpm; data.beats = beats; data.xmlBpm = xb; lastJson = json
+        val page = data.lastPage; val bpm = data.bpm; val beats = data.beats; val xb = data.xmlBpm; val xf = data.xfingers.toList()
+        data = Store.parse(json); data.xfingers.clear(); data.xfingers.addAll(xf); data.lastPage = page; data.bpm = bpm; data.beats = beats; data.xmlBpm = xb; lastJson = json
         Store.saveData(this, score.id, data)
         refreshFixes(); updatePracticeBar(); redraw()
     }
@@ -834,6 +840,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         // the XML screen saves its own tempo / hands / sound choice: pick them up so this screen doesn't overwrite them
         if (::score.isInitialized && ::data.isInitialized && ::playBar.isInitialized) {
             val disk = Store.loadData(this, score.id)
+            data.xfingers.clear(); data.xfingers.addAll(disk.xfingers); data.fingerScale = disk.fingerScale
             if (data.xmlBpm != disk.xmlBpm || data.playHands != disk.playHands || data.playSound != disk.playSound) {
                 data.xmlBpm = disk.xmlBpm; data.playHands = disk.playHands; data.playSound = disk.playSound
                 if (playBar.visibility == View.VISIBLE) buildPlayBar()

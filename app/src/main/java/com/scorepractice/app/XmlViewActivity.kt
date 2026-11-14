@@ -93,6 +93,8 @@ class XmlViewActivity : AppCompatActivity() {
             text = "코드"; isChecked = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("xmlChords", true)
             setOnCheckedChangeListener { _, v -> getSharedPreferences("settings", MODE_PRIVATE).edit().putBoolean("xmlChords", v).apply(); js("toggleChords($v)") }
         })
+        fingerBtn = small("손번호") { setFingerMode(!fingerMode) }
+        bar.addView(fingerBtn)
         bar.addView(CheckBox(this).apply { text = "반복"; setOnCheckedChangeListener { _, v -> loop = v; players.forEach { it.isLooping = v } } })
         root.addView(bar)
         // tempo row: −5 −1 [♩= typed number] +1 +5 [악보 빠르기]
@@ -117,6 +119,17 @@ class XmlViewActivity : AppCompatActivity() {
         tbar.addView(small("+1") { setBpm(bpm + 1) }); tbar.addView(small("+5") { setBpm(bpm + 5) })
         if (sc.tempo > 0) tbar.addView(small("악보 ♩=${sc.tempo}") { setBpm(sc.tempo) })
         root.addView(tbar)
+        // fingering tools (shown in fingering mode)
+        fbarWrap = android.widget.HorizontalScrollView(this).apply { setBackgroundColor(Color.rgb(255, 243, 224)); visibility = android.view.View.GONE }
+        val fbar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), 0, dp(4), 0) }
+        fbar.addView(small("PDF에서 읽기") { askRange("PDF에서 손번호 읽어오기") { a, b -> readPdf(a, b) } })
+        fbar.addView(small("비슷한 곳에서") { askRange("같거나 비슷한 곳의 손번호 불러오기") { a, b -> fromSimilar(a, b) } })
+        applyBtn = small("제안 적용") { applyProposals(true) }; fbar.addView(applyBtn)
+        dropBtn = small("제안 버리기") { applyProposals(false) }; fbar.addView(dropBtn)
+        fbar.addView(small("↶") { undoF() }); fbar.addView(small("↷") { redoF() })
+        fbar.addView(small("숫자−") { scaleF(0.85f) }); fbar.addView(small("숫자+") { scaleF(1.18f) })
+        fbar.addView(small("완료") { setFingerMode(false) })
+        fbarWrap.addView(fbar); root.addView(fbarWrap)
         setContentView(root, ViewGroup.LayoutParams(-1, -1))
         setBpm(bpm); idleText()
     }
@@ -162,6 +175,11 @@ class XmlViewActivity : AppCompatActivity() {
             } catch (e: Exception) {}
             return a.toString()
         }
+        @JavascriptInterface fun xfingers(): String = fingersJson()
+        @JavascriptInterface fun fingerScale(): Double = data.fingerScale.toDouble()
+        @JavascriptInterface fun fingerTap(m: Int, t: Double, k: Int) { main.post { tapFinger(m, t, k) } }
+        @JavascriptInterface fun fingerSet(m: Int, t: Double, k: Int, n: Int) { main.post { setFinger(m, t, k, n) } }
+        @JavascriptInterface fun fingerExit() { main.post { setFingerMode(false) } }
         @JavascriptInterface fun showColors(): Boolean = prefs.getBoolean("xmlColors", true)
         @JavascriptInterface fun showChords(): Boolean = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("xmlChords", true)
         @JavascriptInterface fun chords(): String {
@@ -241,6 +259,143 @@ class XmlViewActivity : AppCompatActivity() {
     }
 
     override fun onPause() { super.onPause(); stop() }
+
+    // ---------------------------------------------------------------- fingering
+    private var fingerMode = false
+    private lateinit var fingerBtn: Button
+    private lateinit var fbarWrap: android.widget.HorizontalScrollView
+    private lateinit var applyBtn: Button
+    private lateinit var dropBtn: Button
+    private val fUndo = ArrayDeque<String>(); private val fRedo = ArrayDeque<String>()
+    private var pdfScan: List<FingerRead.PMeasure>? = null
+
+    private fun fingersJson(): String = org.json.JSONArray().apply { data.xfingers.forEach { put(it.toJson()) } }.toString()
+    private fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_LONG).show()
+
+    private fun setFingerMode(on: Boolean) {
+        if (on) stop()
+        fingerMode = on
+        fbarWrap.visibility = if (on) android.view.View.VISIBLE else android.view.View.GONE
+        fingerBtn.setTextColor(if (on) Color.rgb(200, 30, 30) else Color.BLACK)
+        js("setFingerMode($on)")
+        status.text = if (on) "음표를 누른 채 긁기: → 1 · ↗ 2 · ↑ 3 · ↖ 4 · ← 위쪽 5 / 숫자 있는 음표 누르기 = 지우기" else "시작할 마디를 누르세요"
+        if (on) toast("손번호: 음표를 누르고 오른쪽(1)부터 왼쪽 위(5)까지 방향으로 긁으세요. 왼쪽으로 긁으면 끝")
+        updateF()
+    }
+
+    /** remember for undo, save, redraw */
+    private fun changeF(before: String) {
+        fUndo.addLast(before); if (fUndo.size > 100) fUndo.removeFirst(); fRedo.clear()
+        Store.saveData(this, score.id, data); updateF()
+    }
+
+    private fun updateF() {
+        val np = data.xfingers.count { it.p }
+        applyBtn.text = if (np > 0) "제안 적용 ($np)" else "제안 적용"
+        applyBtn.isEnabled = np > 0; dropBtn.isEnabled = np > 0
+        js("setFingers(${fingersJson()}, ${data.fingerScale})")
+    }
+
+    private fun restoreF(json: String) {
+        data.xfingers.clear()
+        val a = org.json.JSONArray(json); for (i in 0 until a.length()) data.xfingers.add(XFinger.of(a.getJSONObject(i)))
+        Store.saveData(this, score.id, data); updateF()
+    }
+    private fun undoF() { val p = fUndo.removeLastOrNull() ?: run { toast("되돌릴 것이 없습니다"); return }; fRedo.addLast(fingersJson()); restoreF(p) }
+    private fun redoF() { val p = fRedo.removeLastOrNull() ?: run { toast("다시 할 것이 없습니다"); return }; fUndo.addLast(fingersJson()); restoreF(p) }
+
+    private fun scaleF(f: Float) { data.fingerScale = (data.fingerScale * f).coerceIn(0.5f, 2.5f); Store.saveData(this, score.id, data); updateF() }
+
+    private fun tapFinger(m: Int, t: Double, k: Int) {
+        val key = XFinger(m, t, k, 0)
+        if (data.xfingers.none { it.same(key) }) { status.text = "숫자를 넣으려면 음표를 누른 채 긁으세요 (→1 ↗2 ↑3 ↖4 ←위5)"; return }
+        val before = fingersJson(); data.xfingers.removeAll { it.same(key) }; changeF(before)
+    }
+
+    private fun setFinger(m: Int, t: Double, k: Int, n: Int) {
+        val before = fingersJson(); val f = XFinger(m, t, k, n)
+        data.xfingers.removeAll { it.same(f) }; data.xfingers.add(f); changeF(before)
+    }
+
+    private fun applyProposals(keep: Boolean) {
+        val before = fingersJson()
+        if (keep) data.xfingers.forEach { it.p = false } else data.xfingers.removeAll { it.p }
+        changeF(before)
+        status.text = if (keep) "제안을 적용했습니다 (↶ 로 되돌리기)" else "제안을 버렸습니다"
+    }
+
+    /** proposals replace older proposals on the same notes; notes with an accepted number keep it */
+    private fun addProposals(list: List<XFinger>, what: String) {
+        if (list.isEmpty()) { status.text = "$what: 찾은 손번호가 없습니다"; return }
+        val before = fingersJson()
+        data.xfingers.removeAll { o -> o.p && list.any { it.same(o) } }
+        data.xfingers.addAll(list.filter { f -> data.xfingers.none { !it.p && it.same(f) } })
+        changeF(before)
+        status.text = "$what: 주황색 제안 ${list.size}개 · 틀린 건 눌러 지우거나 긁어 고친 뒤 '제안 적용'"
+    }
+
+    private fun idxOf(txt: String, def: Int): Int {
+        val t = txt.trim(); if (t.isEmpty()) return def
+        sc.measures.indexOfFirst { it.number == t }.let { if (it >= 0) return it }
+        t.toIntOrNull()?.let { n -> sc.indexOf(n).let { if (it >= 0) return it }; return (n - 1).coerceIn(0, sc.measures.size - 1) }
+        return def
+    }
+
+    /** measure range (printed numbers); starts with the range last chosen for playing, else the whole piece */
+    private fun askRange(title: String, go: (Int, Int) -> Unit) {
+        val a0 = if (playA >= 0) playA else 0; val b0 = if (playA >= 0 && playB >= 0) playB else sc.measures.size - 1
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
+        fun num(v: String) = android.widget.EditText(this).apply { setText(v); inputType = android.text.InputType.TYPE_CLASS_TEXT; minEms = 3; gravity = Gravity.CENTER; setSelectAllOnFocus(true) }
+        val ea = num(label(a0)); val eb = num(label(b0))
+        row.addView(TextView(this).apply { text = "마디 " }); row.addView(ea); row.addView(TextView(this).apply { text = " ~ " }); row.addView(eb)
+        androidx.appcompat.app.AlertDialog.Builder(this).setTitle(title).setView(row)
+            .setNeutralButton("곡 전체") { _, _ -> go(0, sc.measures.size - 1) }
+            .setNegativeButton("취소", null)
+            .setPositiveButton("읽기") { _, _ ->
+                val a = idxOf(ea.text.toString(), 0); val b = idxOf(eb.text.toString(), sc.measures.size - 1)
+                go(minOf(a, b), maxOf(a, b))
+            }.show()
+    }
+
+    private fun fromSimilar(a: Int, b: Int) {
+        if (data.xfingers.none { !it.p }) { status.text = "먼저 손번호를 몇 군데 넣어 주세요 (적용된 손번호를 보고 비슷한 곳을 찾습니다)"; return }
+        addProposals(FingerRead.fromSimilar(sc, data.xfingers, a, b), "비슷한 곳에서")
+    }
+
+    private fun readPdf(a: Int, b: Int) {
+        val pdf = File(Store.scoreDir(this), score.file)
+        if (!pdf.exists()) { status.text = "이 곡의 PDF가 없습니다"; return }
+        status.text = "PDF를 살펴보는 중…"
+        Thread {
+            try {
+                val pms = pdfScan ?: run {
+                    val all = mutableListOf<FingerRead.PMeasure>()
+                    android.os.ParcelFileDescriptor.open(pdf, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
+                        android.graphics.pdf.PdfRenderer(fd).use { r ->
+                            for (p in 0 until r.pageCount) {
+                                main.post { status.text = "PDF를 살펴보는 중… ${p + 1}/${r.pageCount}쪽" }
+                                r.openPage(p).use { pg ->
+                                    val w = 1800; val h = (w.toLong() * pg.height / pg.width).toInt()
+                                    val bm = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+                                    bm.eraseColor(Color.WHITE); pg.render(bm, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                    all.addAll(FingerRead.scanPage(bm, p, data.fingers)); bm.recycle()
+                                }
+                            }
+                        }
+                    }
+                    all.also { pdfScan = it }
+                }
+                val map = FingerRead.alignMeasures(sc, pms)
+                val found = FingerRead.fromPdf(sc, pms, map, a, b, data.xfingers)
+                val matched = (a..b).count { map.getOrNull(it) ?: -1 >= 0 }
+                main.post {
+                    addProposals(found, "PDF에서 (PDF 마디 ${pms.size}개 찾음, 맞춘 마디 $matched/${b - a + 1})")
+                }
+            } catch (e: Throwable) {
+                main.post { status.text = "PDF를 읽지 못했습니다: ${e.message ?: e}" }
+            }
+        }.start()
+    }
 }
 
 /** XML tempo: this score's last XML tempo → the last XML tempo used anywhere → the score's own marking → 100 */

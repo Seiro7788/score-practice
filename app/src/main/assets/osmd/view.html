@@ -15,10 +15,17 @@
   .hide .ch { display: none; }
   #dyn { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
   .nodyn #dyn { display: none; }
+  .fing { font-family: serif; font-weight: bold; paint-order: stroke; stroke: #fff; stroke-width: 4px; }
+  #guide { position: fixed; pointer-events: none; display: none; width: 0; height: 0; }
+  #guide span { position: absolute; transform: translate(-50%, -50%); font: bold 20px sans-serif; color: #444; }
+  #guide span.on { font-size: 34px; color: #c81e1e; }
+  #guide i { position: absolute; transform: translate(-50%, -50%); width: 300px; height: 300px; border-radius: 50%; background: rgba(255,255,255,.55); }
+  #noteMark { position: absolute; pointer-events: none; display: none; border: 3px solid #e6005a; border-radius: 50%; }
 </style></head>
 <body>
 <div id="msg">악보를 그리는 중…</div>
 <div id="osmd"></div>
+<div id="guide"><i></i></div>
 <script src="opensheetmusicdisplay.min.js"></script>
 <script>
   let osmd = null, boxes = [];
@@ -100,7 +107,7 @@
   // redraw at another size (the score re-flows to the screen width); marks and chords follow
   function setZoom(z) {
     osmd.zoom = z; osmd.render(); collect();
-    drawChords(chordList); drawDyn(dynList); drawMelody(melodyOn);
+    drawChords(chordList); drawDyn(dynList); drawMelody(melodyOn); nidx = null; drawFingers();
     for (const k of Object.keys(marks)) { const i = marks[k].dataset.i | 0; mark(k, i); }
   }
   // loudness band under each system: thin & pale = ppp ... thick & deep = fff; hairpins become wedges
@@ -235,6 +242,122 @@
     return bd < 6 ? best : -1;
   }
 
+
+  // ---------------- fingering on notes: [{m, t, k (midi), n, p (proposal)}]
+  let fingers = [], fingerScale = 1;
+  function noteIndex() {           // every drawn note head: key "m|t|midi" -> {x, y, st}
+    const idx = {}, ml = osmd.GraphicSheet.MeasureList;
+    for (let i = 0; i < ml.length; i++) for (let st = 0; st < (ml[i] || []).length; st++) {
+      const gm = ml[i][st]; if (!gm) continue;
+      for (const se of gm.staffEntries) {
+        const t = Math.round(se.relInMeasureTimestamp.RealValue * 4 * 96) / 96;
+        for (const gve of se.graphicalVoiceEntries) for (const g of gve.notes) {
+          if (!g.sourceNote || g.sourceNote.isRest() || !g.sourceNote.Pitch) continue;
+          const a = g.PositionAndShape.AbsolutePosition;
+          idx[i + '|' + t + '|' + (g.sourceNote.halfTone + 12)] = { m: i, t, k: g.sourceNote.halfTone + 12, x: a.x, y: a.y, st };
+        }
+      }
+    }
+    return idx;
+  }
+  let nidx = null;
+  function fkey(f) { return f.m + '|' + (Math.round(f.t * 96) / 96) + '|' + f.k; }
+  function setFingers(list, scale) { fingers = list; if (scale) fingerScale = scale; drawFingers(); }
+  function drawFingers() {
+    document.querySelectorAll('.fing').forEach(e => e.remove());
+    if (!osmd || !svgEl()) return;
+    nidx = nidx || noteIndex();
+    const svg = svgEl(), ns = 'http://www.w3.org/2000/svg', u = 10, fs = 15 * fingerScale;
+    const groups = {};                 // one chord (measure, onset, staff) -> its numbers
+    for (const f of fingers) {
+      const p = nidx[fkey(f)]; if (!p) continue;
+      const g = groups[p.m + '|' + p.t + '|' + p.st] || (groups[p.m + '|' + p.t + '|' + p.st] = { st: p.st, x: p.x, ys: [], list: [] });
+      g.list.push({ f, y: p.y }); g.x = Math.min(g.x, p.x);
+    }
+    const nSt = Math.max(...osmd.GraphicSheet.MeasureList.map(m => (m || []).length));
+    for (const g of Object.values(groups)) {
+      const low = nSt > 1 && g.st === nSt - 1;                // lower staff: numbers below, upper: above
+      const notesY = g.list.map(o => o.y);
+      if (!low) {
+        g.list.sort((a, b) => b.y - a.y);                      // lowest note first, numbers stack upwards
+        const top = Math.min(...notesY, 0) ; const base = Math.min(...notesY) - 1.9;
+        g.list.forEach((o, j) => put(o.f, g.x, base - j * 1.35));
+      } else {
+        g.list.sort((a, b) => a.y - b.y);                      // highest first, numbers stack downwards
+        const base = Math.max(...notesY) + 2.9;
+        g.list.forEach((o, j) => put(o.f, g.x, base + j * 1.35));
+      }
+    }
+    function put(f, x, y) {
+      const t = document.createElementNS(ns, 'text');
+      t.setAttribute('x', ((x + 0.6) * u).toFixed(1)); t.setAttribute('y', (y * u).toFixed(1));
+      t.setAttribute('font-size', fs.toFixed(1)); t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('class', 'fing'); t.setAttribute('fill', f.p ? '#e07000' : '#141e78');
+      t.textContent = f.n; svg.appendChild(t);
+    }
+  }
+
+  // fingering mode: press a note, then swipe — 1 = right (0°), 2 ≈ 34°, 3 ≈ 68°, 4 ≈ 101°, 5 = 135° (±15°)
+  // left (180°) = leave the mode, down-left (225°) = cancel; a tap on a numbered note removes its number
+  let fingerMode = false, fStart = null, fNote = null;
+  const ANG = [0, 33.75, 67.5, 101.25, 135], TOL = 15;
+  function choice(dx, dy) {
+    let a = Math.atan2(-dy, dx) * 180 / Math.PI; if (a < -90) a += 360;
+    if (Math.abs(a - 180) <= TOL) return 0;
+    if (Math.abs(a - 225) <= TOL) return -2;
+    for (let i = 0; i < 5; i++) if (Math.abs(a - ANG[i]) <= TOL) return i + 1;
+    return -1;
+  }
+  function setFingerMode(on) { fingerMode = on; fStart = null; showGuide(null); }
+  function noteAt(cx, cy) {
+    nidx = nidx || noteIndex();
+    const s = svgEl().getBoundingClientRect(), u = unit();
+    const ux = (cx - s.left) / u - 0.6, uy = (cy - s.top) / u;
+    let best = null, bd = 1e9;
+    for (const p of Object.values(nidx)) { const d = Math.hypot((p.x - ux) * 1.3, p.y - uy); if (d < bd) { bd = d; best = p; } }
+    return bd < 2.6 ? best : null;
+  }
+  function showGuide(sel) {
+    const gd = document.getElementById('guide'), mk = document.getElementById('noteMark');
+    if (!fStart) { gd.style.display = 'none'; if (mk) mk.style.display = 'none'; return; }
+    gd.style.display = 'block'; gd.style.left = fStart.x + 'px'; gd.style.top = fStart.y + 'px';
+    gd.querySelectorAll('span').forEach(e => e.remove());
+    const R = 105, lab = (txt, a, on) => { const e = document.createElement('span'); e.textContent = txt; if (on) e.className = 'on';
+      e.style.left = (R * Math.cos(a * Math.PI / 180)) + 'px'; e.style.top = (-R * Math.sin(a * Math.PI / 180)) + 'px'; gd.appendChild(e); };
+    for (let i = 0; i < 5; i++) lab(String(i + 1), ANG[i], sel === i + 1);
+    lab('완료', 180, sel === 0); lab('취소', 225, sel === -2);
+  }
+  function markNote(p) {
+    let mk = document.getElementById('noteMark');
+    if (!mk) { mk = document.createElement('div'); mk.id = 'noteMark'; document.getElementById('osmd').appendChild(mk); }
+    if (!p) { mk.style.display = 'none'; return; }
+    const s = svgEl().getBoundingClientRect(), host = document.getElementById('osmd').getBoundingClientRect(), u = unit();
+    const r = 1.6 * u;
+    Object.assign(mk.style, { display: 'block', left: (s.left - host.left + (p.x + 0.6) * u - r) + 'px', top: (s.top - host.top + p.y * u - r) + 'px', width: 2 * r + 'px', height: 2 * r + 'px' });
+  }
+  document.addEventListener('touchstart', e => {
+    if (!fingerMode || e.touches.length !== 1) { fStart = null; showGuide(null); return; }
+    const t = e.touches[0]; fNote = noteAt(t.clientX, t.clientY);
+    if (!fNote) { fStart = null; return; }
+    fStart = { x: t.clientX, y: t.clientY, now: null }; markNote(fNote); showGuide(-1); e.preventDefault();
+  }, { passive: false });
+  document.addEventListener('touchmove', e => {
+    if (!fingerMode || !fStart) return;
+    if (e.touches.length !== 1) { fStart = null; showGuide(null); markNote(null); return; }
+    const t = e.touches[0]; fStart.now = { x: t.clientX, y: t.clientY };
+    const dx = t.clientX - fStart.x, dy = t.clientY - fStart.y;
+    showGuide(Math.hypot(dx, dy) > 25 ? choice(dx, dy) : -1); e.preventDefault();
+  }, { passive: false });
+  document.addEventListener('touchend', e => {
+    if (!fingerMode || !fStart) return;
+    const end = fStart.now || fStart, dx = end.x - fStart.x, dy = end.y - fStart.y, p = fNote;
+    fStart = null; showGuide(null); markNote(null); e.preventDefault();
+    if (!window.Android || !p) return;
+    if (Math.hypot(dx, dy) < 25) { Android.fingerTap(p.m, p.t, p.k); return; }
+    const c = choice(dx, dy);
+    if (c >= 1) Android.fingerSet(p.m, p.t, p.k, c); else if (c === 0) Android.fingerExit();
+  }, { passive: false });
+
   async function start(xml, zoom) {
     try {
       osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay('osmd', { autoResize: false, backend: 'svg', drawTitle: true, drawPartNames: false, coloringEnabled: true });
@@ -247,12 +370,14 @@
       document.getElementById('msg').remove();
       document.getElementById('osmd').addEventListener('click', e => {
         const i = measureAt(e.clientX, e.clientY);
+        if (fingerMode) return;
         if (i >= 0 && window.Android) Android.onMeasure(i);
       });
       if (window.Android) {
         try { chordList = JSON.parse(Android.chords()); drawChords(chordList); toggleChords(Android.showChords()); } catch (e) {}
         try { dynList = JSON.parse(Android.dynamics()); drawDyn(dynList); toggleDyn(Android.showDyn()); } catch (e) {}
         try { melodyOn = Android.showMelody(); drawMelody(melodyOn); } catch (e) {}
+        try { setFingers(JSON.parse(Android.xfingers()), Android.fingerScale()); } catch (e) {}
         Android.onReady(boxes.length);
       }
     } catch (err) {
