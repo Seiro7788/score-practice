@@ -62,7 +62,7 @@ object PdfExport {
         if (opt.fingers) {
             val fp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; isFakeBoldText = true; color = Color.rgb(20, 30, 120) }
             val halo = Paint(fp).apply { color = Color.WHITE; style = Paint.Style.STROKE }
-            for (g in d.fingers) if (g.page == page) {
+            for (g in d.fingers) if (g.page == page && d.fingerVisible(g)) {
                 val ts = g.s * W * 1.7f * d.fingerScale; fp.textSize = ts; halo.textSize = ts; halo.strokeWidth = ts * 0.18f
                 val yb = sy(g.y) + ts * 0.36f
                 c.drawText(g.n.toString(), sx(g.x), yb, halo); c.drawText(g.n.toString(), sx(g.x), yb, fp)

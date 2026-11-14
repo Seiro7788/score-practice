@@ -40,7 +40,7 @@ data class Fix(val page: Int, val x: Float, val y: Float, val r: Float, val colo
                val manual: Boolean = false)   // manual = placed by hand (drawn as a coloured head shape, not by recolouring ink)   // auto = made by automatic colouring
 
 /** fingering number placed by the user: centre (normalized), s = staff spacing / page width at that time */
-data class Finger(val page: Int, var x: Float, var y: Float, val n: Int, val s: Float)
+data class Finger(val page: Int, var x: Float, var y: Float, val n: Int, val s: Float, val layer: String = "")   // layer "" = not in a layer
 
 /** fingering on a note of the attached MusicXML: measure index (file order), onset in quarters within the measure,
  *  MIDI pitch, finger 1..5. p = only proposed (read from the PDF / copied from a similar passage), not yet accepted */
@@ -76,6 +76,9 @@ class ScoreData {
     fun layer(id: String) = layers.firstOrNull { it.id == id }
 
     /** handwriting shown: ink switched on and its layer visible */
+    fun fingerVisible(g: Finger) = showFingers && (g.layer.isEmpty() || layer(g.layer)?.visible != false)
+    /** one size for all fingering numbers of the score: the size most of them already have */
+    fun fingerSize(): Float? = fingers.map { it.s }.sorted().let { if (it.isEmpty()) null else it[it.size / 2] }
     fun strokeVisible(s: Stroke) = showInk && (s.layer.isEmpty() || layer(s.layer)?.visible != false)
 }
 
@@ -156,7 +159,7 @@ object Store {
             for (i in 0 until ga.length()) {
                 val g = ga.getJSONObject(i)
                 d.fingers.add(Finger(g.getInt("page"), g.getDouble("x").toFloat(), g.getDouble("y").toFloat(),
-                    g.getInt("n"), g.getDouble("s").toFloat()))
+                    g.getInt("n"), g.getDouble("s").toFloat(), g.optString("layer")))
             }
             d.showFingers = o.optBoolean("showFingers", true)
             o.optJSONArray("xfingers")?.let { xa -> for (i in 0 until xa.length()) d.xfingers.add(XFinger.of(xa.getJSONObject(i))) }
@@ -206,7 +209,7 @@ object Store {
         o.put("fingers", JSONArray().apply {
             d.fingers.forEach { g ->
                 put(JSONObject().put("page", g.page).put("x", g.x.toDouble()).put("y", g.y.toDouble())
-                    .put("n", g.n).put("s", g.s.toDouble()))
+                    .put("n", g.n).put("s", g.s.toDouble()).put("layer", g.layer))
             }
         })
         o.put("showFingers", d.showFingers)

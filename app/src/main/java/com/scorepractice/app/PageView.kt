@@ -227,7 +227,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
 
     private fun fingerAt(x: Float, y: Float): Finger? {
         val r = 1.3f * staffSpaceNorm()
-        return host.data.fingers.filter { it.page == page && abs(it.x - x) < r && abs((it.y - y) * dst.height() / dst.width()) < r * 1.2f }
+        return host.data.fingers.filter { it.page == page && (host.data.fingerVisible(it) || it.layer == host.data.activeLayer) && abs(it.x - x) < r && abs((it.y - y) * dst.height() / dst.width()) < r * 1.2f }
             .minByOrNull { abs(it.x - x) + abs(it.y - y) }
     }
 
@@ -311,7 +311,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
             c.drawRect(rr.left, rr.top - 40f / z, rr.left + tw + 16f / z, rr.top, labelBg)
             label.color = col; c.drawText(t, rr.left + 8f / z, rr.top - 9f / z, label)
         }
-        if (host.data.showFingers || host.mode == Mode.FINGER) for (g in host.data.fingers) if (g.page == page) {
+        for (g in host.data.fingers) if (g.page == page && (host.data.fingerVisible(g) || (host.mode == Mode.FINGER && g.layer == host.data.activeLayer))) {
             val ts = g.s * dst.width() * 1.7f * host.data.fingerScale
             fingerPaint.textSize = ts; fingerHalo.textSize = ts; fingerHalo.strokeWidth = ts * 0.18f
             val yb = sy(g.y) + ts * 0.36f
@@ -428,7 +428,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
                             if (hypot(dx, dy) < 30f) { if (h != null) host.onFingerRemove(h) }
                             else when (val k = choice(dx, dy)) {
                                 0 -> host.onFingerExit()
-                                in 1..5 -> host.onFingerAdd(Finger(page, nx(s.first), ny(s.second), k, staffSpaceNorm()))
+                                in 1..5 -> host.onFingerAdd(Finger(page, nx(s.first), ny(s.second), k, host.data.fingerSize() ?: staffSpaceNorm(), host.data.activeLayer))
                                 else -> {}
                             }
                         }

@@ -39,6 +39,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         get() = straight && Color.alpha(penColor) < 255
     private var straight = false
     private var penLayerLabel: (() -> Unit)? = null
+    private var fingerLayerLabel: (() -> Unit)? = null
     private var penSize = 1; private var hiSize = 1
     private val PEN_WIDTHS = floatArrayOf(0.0018f, 0.003f, 0.005f)
     private val HI_WIDTHS = floatArrayOf(0.009f, 0.014f, 0.022f)
@@ -161,6 +162,23 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                 }.show()
             }
         }, 0)
+        // fingering numbers go into a layer too (the same one as handwriting), chosen in the fingering bar
+        findViewById<LinearLayout>(R.id.fingerBar).addView(Button(this).apply {
+            isAllCaps = false; minWidth = 0; minimumWidth = 0; textSize = 13f
+            val show = { text = "레이어: " + (data.layer(data.activeLayer)?.name ?: "") }
+            show(); fingerLayerLabel = show
+            setOnClickListener {
+                val names = data.layers.map { it.name }.toTypedArray()
+                AlertDialog.Builder(this@ViewerActivity).setTitle("손번호를 넣을 레이어").setItems(names) { _, i ->
+                    data.activeLayer = data.layers[i].id
+                    if (!data.layers[i].visible) data.layers[i].visible = true
+                    save(); show(); penLayerLabel?.invoke(); redraw()
+                }.show()
+            }
+        }, 1)
+        // numbers put in at different times had different sizes: give them all the size most of them have
+        data.fingerSize()?.let { s0 -> if (data.fingers.any { kotlin.math.abs(it.s - s0) > s0 * 0.08f }) {
+            val all = data.fingers.map { it.copy(s = s0) }; data.fingers.clear(); data.fingers.addAll(all) } }
         findViewById<Button>(R.id.penErase).setOnClickListener { erasing = true; toast("지우개: 지울 선을 문지르세요") }
         findViewById<Button>(R.id.undo).setOnClickListener { undo() }
         findViewById<Button>(R.id.btnBack).setOnClickListener { finish() }
@@ -196,6 +214,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         if (m == PageView.Mode.FIX && !data.showFixes) { data.showFixes = true; redraw() }
         btnRange.text = if (m == PageView.Mode.RANGE) "범위 끝" else "범위"
         if (m == PageView.Mode.RANGE) toast("연습할 부분을 손가락으로 끌어 네모를 그리세요")
+        if (m == PageView.Mode.FINGER) { fingerLayerLabel?.invoke(); data.layer(data.activeLayer)?.let { if (!it.visible) { it.visible = true; redraw() } } }
         if (m == PageView.Mode.PEN) { penLayerLabel?.invoke(); data.layer(data.activeLayer)?.let { if (!it.visible) { it.visible = true; redraw() } }; erasing = false; if (!data.showInk) { data.showInk = true; redraw() } }
         if (m == PageView.Mode.VIEW) save()
         updatePracticeBar()
@@ -625,7 +644,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val cb = CheckBox(this).apply { isChecked = l.visible; setOnCheckedChangeListener { _, v -> l.visible = v; save(); redraw() } }
             val rb = RadioButton(this).apply {
-                text = "${l.name}  (범위 ${data.ranges.count { it.layer == l.id }} · 필기 ${data.strokes.count { it.layer == l.id }})"; setTextColor(l.color); isChecked = l.id == data.activeLayer
+                text = "${l.name}  (범위 ${data.ranges.count { it.layer == l.id }} · 필기 ${data.strokes.count { it.layer == l.id }} · 손번호 ${data.fingers.count { it.layer == l.id }})"; setTextColor(l.color); isChecked = l.id == data.activeLayer
                 setOnClickListener { data.activeLayer = l.id; save() }
             }
             row.addView(cb); row.addView(rb)
@@ -670,7 +689,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                     AlertDialog.Builder(this).setView(e).setPositiveButton("저장") { _, _ -> l.name = e.text.toString(); save() }.show() }
                 1 -> { data.ranges.filter { it.layer == l.id }.forEach { it.count = 0; it.log.clear() }; save(); redraw() }
                 2 -> if (data.layers.size > 1) {
-                    data.ranges.removeAll { it.layer == l.id }; data.strokes.removeAll { it.layer == l.id }; data.layers.remove(l)
+                    data.ranges.removeAll { it.layer == l.id }; data.strokes.removeAll { it.layer == l.id }; data.fingers.removeAll { it.layer == l.id }; data.layers.remove(l)
                     if (data.activeLayer == l.id) data.activeLayer = data.layers[0].id
                     save(); updatePracticeBar()
                 } else toast("레이어가 하나뿐이라 지울 수 없습니다")
