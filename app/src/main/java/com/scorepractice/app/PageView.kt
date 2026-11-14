@@ -71,48 +71,73 @@ class PageView(context: Context, private val host: Host) : View(context) {
         sps.remove(p); refreshFixes()
     }
 
-    fun clearBitmaps() { origs.clear(); shown.clear(); sps.clear() }
+    fun clearBitmaps() { origs.clear(); shown.clear(); sps.clear(); sprites.clear() }
 
     private val bakedKey = mutableMapOf<Int, Int>()
 
-    // the prepared page bitmap is kept and repainted in place (a new 15 MB bitmap per tap ran the phone out of memory)
-    fun refreshFixes() { bakedKey.clear(); invalidate() }
-    /** only this page's colours changed */
-    fun refreshFixes(p: Int) { if (bakedKey.remove(p) != null) invalidate() }
+    // Note colours are a separate layer: each coloured note is a small picture (its own ink pixels in the colour)
+    // drawn over the page. Adding or removing one never touches the page bitmap, so a tap costs the same anywhere.
+    // The page bitmap only bakes in the highlighter (multiply), and is repainted in place when that changes.
+    private val sprites = HashMap<Fix, Pair<Bitmap, android.graphics.Rect>?>()
 
-    /** one colour fix added: paint just that note on the page already prepared instead of rebuilding the page */
-    fun fixAdded(f: Fix) {
-        val p = f.page; val have = shown[p] ?: return
-        val o = origs[p]
-        val hasHi = host.data.strokes.any { it.page == p && Highlight.isHighlighter(it) && host.data.strokeVisible(it) }
-        if (have === o || hasHi || !host.data.showFixes || !have.isMutable) { refreshFixes(p); return }
-        HeadFix.apply(have, f.x * have.width, f.y * have.height, f.r * have.width, f.rb * have.width, f.hollow, f.color)
-        bakedKey[p] = keyOf(p); invalidate()
+    fun refreshFixes() { invalidate() }
+    fun refreshFixes(p: Int) { invalidate() }
+    fun fixAdded(f: Fix) { invalidate() }
+
+    private fun spriteOf(f: Fix, o: Bitmap): Pair<Bitmap, android.graphics.Rect>? {
+        if (sprites.size > 4000) sprites.clear()
+        return sprites.getOrPut(f) {
+            val cx = f.x * o.width; val cy = f.y * o.height; val a = f.r * o.width; val b = f.rb * o.width
+            val ia = (a * 1.25f).toInt() + 2
+            val x0 = kotlin.math.max(0, (cx - ia).toInt()); val y0 = kotlin.math.max(0, (cy - ia).toInt())
+            val x1 = kotlin.math.min(o.width, (cx + ia).toInt() + 1); val y1 = kotlin.math.min(o.height, (cy + ia).toInt() + 1)
+            if (x1 <= x0 || y1 <= y0) return@getOrPut null
+            val bm = Bitmap.createBitmap(o, x0, y0, x1 - x0, y1 - y0).copy(Bitmap.Config.ARGB_8888, true)
+            bm.eraseColor(Color.TRANSPARENT)
+            val src = Bitmap.createBitmap(o, x0, y0, x1 - x0, y1 - y0)
+            val tmp = src.copy(Bitmap.Config.ARGB_8888, true)
+            HeadFix.apply(tmp, cx - x0, cy - y0, a, b, f.hollow, f.color)
+            // keep only the pixels the colouring changed
+            val w = x1 - x0; val h = y1 - y0; val p0 = IntArray(w * h); val p1 = IntArray(w * h)
+            src.getPixels(p0, 0, w, 0, 0, w, h); tmp.getPixels(p1, 0, w, 0, 0, w, h)
+            for (i in p1.indices) if (p1[i] == p0[i]) p1[i] = Color.TRANSPARENT
+            bm.setPixels(p1, 0, w, 0, 0, w, h)
+            tmp.recycle()
+            bm to android.graphics.Rect(x0, y0, x1, y1)
+        }
+    }
+
+    private fun drawFixes(c: Canvas, p: Int) {
+        if (!host.data.showFixes) return
+        val o = origs[p] ?: return
+        val k = dst.width() / o.width
+        val r = RectF()
+        for (f in host.data.fixes) if (f.page == p) {
+            val (bm, box) = spriteOf(f, o) ?: continue
+            r.set(dst.left + box.left * k, dst.top + box.top * k, dst.left + box.right * k, dst.top + box.bottom * k)
+            c.drawBitmap(bm, null, r, bmpPaint)
+        }
     }
 
     private fun keyOf(p: Int): Int {
-        val fx = if (host.data.showFixes) host.data.fixes.filter { it.page == p } else emptyList()
-        val hi = host.data.strokes.filter { it.page == p && Highlight.isHighlighter(it) && host.data.strokeVisible(it) }
-        var key = fx.hashCode()
-        for (s in hi) key = key * 31 + System.identityHashCode(s)
+        var key = 17
+        for (s in host.data.strokes) if (s.page == p && Highlight.isHighlighter(s) && host.data.strokeVisible(s)) key = key * 31 + System.identityHashCode(s)
         return key
     }
 
-    /** page bitmap with colour fixes and highlighter baked in; rebuilt only when those change */
+    /** page bitmap with the highlighter baked in; rebuilt (in the same bitmap) only when the highlighter changes */
     private fun baked(p: Int): Bitmap? {
         val o = origs[p] ?: return null
-        val fx = if (host.data.showFixes) host.data.fixes.filter { it.page == p } else emptyList()
         val hi = host.data.strokes.filter { it.page == p && Highlight.isHighlighter(it) && host.data.strokeVisible(it) }
+        if (hi.isEmpty()) { shown.remove(p); bakedKey.remove(p); return o }
         val key = keyOf(p)
         val have = shown[p]
         if (have != null && bakedKey[p] == key) return have
         val reuse = have?.takeIf { it !== o && it.isMutable && !it.isRecycled && it.width == o.width && it.height == o.height }
-        val bm = if (fx.isEmpty() && hi.isEmpty()) o else (reuse?.also { b ->
-            android.graphics.Canvas(b).drawBitmap(o, 0f, 0f, Paint().apply { xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC) })
-        } ?: o.copy(Bitmap.Config.ARGB_8888, true)).also { bm ->
-            for (f in fx) HeadFix.apply(bm, f.x * bm.width, f.y * bm.height, f.r * bm.width, f.rb * bm.width, f.hollow, f.color)
-            Highlight.bake(bm, hi)
-        }
+        val bm = (reuse?.also { b ->
+            Canvas(b).drawBitmap(o, 0f, 0f, Paint().apply { xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC) })
+        } ?: o.copy(Bitmap.Config.ARGB_8888, true))
+        Highlight.bake(bm, hi)
         shown[p] = bm; bakedKey[p] = key; return bm
     }
 
@@ -258,6 +283,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
         select(i)
         c.save(); c.clipRect(segRects[i])
         c.drawBitmap(b, null, dst, bmpPaint)
+        drawFixes(c, segs[i].page)
         for (r in visibleRanges()) {
             val col = host.data.layer(r.layer)?.color ?: Color.RED
             val done = r.count >= r.target && r.target > 0
