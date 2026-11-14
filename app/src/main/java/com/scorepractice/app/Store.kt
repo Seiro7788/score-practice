@@ -61,6 +61,7 @@ class ScoreData {
     var fingerScale = 1f  // size of fingering numbers for this score
     var bpm = 0      // metronome tempo used for this score (0 = never set)
     var beats = 0
+    var xmlBpm = 0   // tempo used in the XML score view / playback (kept apart from the practice metronome)
 
     fun layer(id: String) = layers.firstOrNull { it.id == id }
 
@@ -152,7 +153,7 @@ object Store {
             d.fingerScale = o.optDouble("fingerScale", 1.0).toFloat()
             d.playHands = o.optInt("playHands", 2); d.playSound = o.optInt("playSound", 0)
             d.keySig = o.optInt("keySig", 99); d.lowerTreble = o.optBoolean("lowerTreble")
-            d.bpm = o.optInt("bpm", 0); d.beats = o.optInt("beats", 0)
+            d.bpm = o.optInt("bpm", 0); d.xmlBpm = o.optInt("xmlBpm", 0); d.beats = o.optInt("beats", 0)
         }
         if (d.layers.isEmpty()) d.layers.add(Layer(newId(), "연습 1", LAYER_COLORS[0]))
         if (d.layer(d.activeLayer) == null) d.activeLayer = d.layers[0].id
@@ -197,7 +198,7 @@ object Store {
         })
         o.put("showFingers", d.showFingers)
         o.put("activeLayer", d.activeLayer).put("showInk", d.showInk).put("lastPage", d.lastPage)
-        o.put("bpm", d.bpm).put("beats", d.beats).put("fingerScale", d.fingerScale.toDouble()).put("playHands", d.playHands).put("playSound", d.playSound).put("keySig", d.keySig).put("lowerTreble", d.lowerTreble)
+        o.put("bpm", d.bpm).put("xmlBpm", d.xmlBpm).put("beats", d.beats).put("fingerScale", d.fingerScale.toDouble()).put("playHands", d.playHands).put("playSound", d.playSound).put("keySig", d.keySig).put("lowerTreble", d.lowerTreble)
         return o
     }
 

@@ -5,6 +5,9 @@
     <LinearLayout android:id="@+id/bar" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:orientation="horizontal"
         android:background="#EEEEF5" android:gravity="center_vertical" android:padding="4dp">
+        <Button android:id="@+id/btnBack" style="?attr/materialButtonOutlinedStyle"
+            android:minWidth="0dp" android:minHeight="0dp" android:paddingStart="9dp" android:paddingEnd="9dp" android:textSize="13sp"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="◀ 뒤로" />
         <TextView android:id="@+id/title" android:layout_width="0dp" android:layout_weight="1"
             android:layout_height="wrap_content" android:textSize="14sp" android:maxLines="1"
             android:ellipsize="end" android:paddingStart="8dp" />
@@ -82,6 +85,15 @@
                 android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp" android:insetTop="0dp" android:insetBottom="0dp"
                 android:text="↷" android:textSize="24sp" android:alpha="0.85" android:contentDescription="다시 하기" />
         </LinearLayout>
+        <LinearLayout android:id="@+id/pageNav" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_gravity="bottom|end" android:layout_margin="10dp" android:orientation="horizontal">
+            <Button android:id="@+id/pgPrev" android:layout_width="52dp" android:layout_height="52dp"
+                android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp" android:insetTop="0dp" android:insetBottom="0dp"
+                android:text="◀" android:textSize="20sp" android:alpha="0.85" android:contentDescription="이전 페이지" />
+            <Button android:id="@+id/pgNext" android:layout_width="52dp" android:layout_height="52dp" android:layout_marginStart="8dp"
+                android:minWidth="0dp" android:minHeight="0dp" android:padding="0dp" android:insetTop="0dp" android:insetBottom="0dp"
+                android:text="▶" android:textSize="20sp" android:alpha="0.85" android:contentDescription="다음 페이지" />
+        </LinearLayout>
     </FrameLayout>
 
     <LinearLayout android:id="@+id/practiceBar" android:layout_width="match_parent"
@@ -113,6 +125,8 @@
                 android:layout_height="wrap_content" android:gravity="center" android:textSize="22sp"
                 android:textStyle="bold" android:inputType="number" android:maxLength="3"
                 android:imeOptions="actionDone" android:selectAllOnFocus="true" />
+            <Button android:id="@+id/mOk" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:minWidth="0dp" android:text="확인" />
             <Button android:id="@+id/mP1" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="+1" />
             <Button android:id="@+id/mP5" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="+5" />
         </LinearLayout>

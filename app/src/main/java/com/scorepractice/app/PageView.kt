@@ -45,6 +45,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
         fun onFingerMoved(f: Finger)
         fun onFingerExit()
         fun onUndoGesture()
+        fun onFlick(dir: Int)   // +1 next page, -1 previous
     }
 
     enum class Mode { VIEW, RANGE, PEN, FIX, FINGER }
@@ -374,6 +375,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
             }
             Mode.FIX -> {
                 if (am == MotionEvent.ACTION_DOWN) { downT = e.eventTime; downX = e.x; downY = e.y }
+                if (am == MotionEvent.ACTION_UP && isFlick(e, 600L)) { host.onFlick(if (e.x < downX) 1 else -1); return true }
                 if (am == MotionEvent.ACTION_UP && hypot(e.x - downX, e.y - downY) < 20f) {
                     val o = origs[page]
                     if (o != null) {
@@ -407,6 +409,12 @@ class PageView(context: Context, private val host: Host) : View(context) {
                 return gd.onTouchEvent(e)
             }
         }
+    }
+
+    /** a quick, long, mostly sideways swipe = turn the page (short strokes and slow lines stay ink) */
+    private fun isFlick(e: MotionEvent, maxMs: Long): Boolean {
+        val dx = e.x - downX; val dy = e.y - downY
+        return e.eventTime - downT <= maxMs && abs(dx) > width * 0.28f && abs(dy) < abs(dx) * 0.45f
     }
 
     private fun penTouch(e: MotionEvent): Boolean {

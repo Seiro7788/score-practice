@@ -51,13 +51,14 @@ class XmlViewActivity : AppCompatActivity() {
         val f = File(Store.scoreDir(this), "$id.musicxml")
         sc = try { MusicXml.load(f) } catch (e: Exception) { Toast.makeText(this, "XML을 읽지 못했습니다", Toast.LENGTH_LONG).show(); finish(); return }
         scoreZoom = prefs.getFloat("xmlZoom", if (resources.displayMetrics.widthPixels > 1400) 0.8f else 0.55f).toDouble()
-        bpm = if (data.bpm > 0) data.bpm else getSharedPreferences("settings", MODE_PRIVATE).getInt("tempo_last", 100)
+        bpm = xmlTempo(this, data, sc)
         title = "악보(XML) · " + score.shownTitle
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.WHITE) }
         // top row: status + score size (redraw bigger / smaller; two fingers also zoom the page)
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(Color.rgb(238, 246, 238)) }
         status = TextView(this).apply { setPadding(dp(12), dp(6), dp(6), dp(6)); textSize = 14f; setTextColor(Color.rgb(30, 30, 30)) }
+        top.addView(Button(this).apply { text = "◀ 뒤로"; isAllCaps = false; minWidth = 0; minimumWidth = 0; setOnClickListener { finish() } })
         top.addView(status, LinearLayout.LayoutParams(0, -2, 1f))
         for ((t, f) in listOf("가−" to 0.85, "가+" to 1.18)) top.addView(Button(this).apply {
             text = t; isAllCaps = false; minWidth = 0; minimumWidth = 0; setOnClickListener { zoomBy(f) } })
@@ -108,6 +109,11 @@ class XmlViewActivity : AppCompatActivity() {
             }
         }
         tbar.addView(tempo, LinearLayout.LayoutParams(0, -2, 1f))
+        tbar.addView(small("확인") {
+            tempo.text.toString().toIntOrNull()?.let { setBpm(it) } ?: tempo.setText(bpm.toString())
+            (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(tempo.windowToken, 0)
+            tempo.clearFocus()
+        })
         tbar.addView(small("+1") { setBpm(bpm + 1) }); tbar.addView(small("+5") { setBpm(bpm + 5) })
         if (sc.tempo > 0) tbar.addView(small("악보 ♩=${sc.tempo}") { setBpm(sc.tempo) })
         root.addView(tbar)
@@ -126,8 +132,8 @@ class XmlViewActivity : AppCompatActivity() {
     private fun setBpm(v: Int) {
         bpm = v.coerceIn(20, 300)
         if (tempo.text.toString() != bpm.toString()) tempo.setText(bpm.toString())
-        data.bpm = bpm; saveData()
-        getSharedPreferences("settings", MODE_PRIVATE).edit().putInt("tempo_last", bpm).apply()
+        if (data.xmlBpm != bpm) { data.xmlBpm = bpm; saveData() }
+        getSharedPreferences("settings", MODE_PRIVATE).edit().putInt("xml_tempo_last", bpm).apply()
         // playing: carry on at the new tempo from the measure being played
         if (players.isNotEmpty()) { val at = if (lastMark >= 0) lastMark else playA; stopPlayers(); play(at, playB) }
     }
@@ -235,4 +241,12 @@ class XmlViewActivity : AppCompatActivity() {
     }
 
     override fun onPause() { super.onPause(); stop() }
+}
+
+/** XML tempo: this score's last XML tempo → the last XML tempo used anywhere → the score's own marking → 100 */
+fun xmlTempo(c: android.content.Context, d: ScoreData, sc: XScore?): Int {
+    if (d.xmlBpm > 0) return d.xmlBpm
+    val p = c.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+    if (p.contains("xml_tempo_last")) return p.getInt("xml_tempo_last", 100)
+    return if (sc != null && sc.tempo > 0) sc.tempo else 100
 }

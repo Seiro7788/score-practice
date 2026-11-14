@@ -163,6 +163,9 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         }, 0)
         findViewById<Button>(R.id.penErase).setOnClickListener { erasing = true; toast("지우개: 지울 선을 문지르세요") }
         findViewById<Button>(R.id.undo).setOnClickListener { undo() }
+        findViewById<Button>(R.id.btnBack).setOnClickListener { finish() }
+        findViewById<Button>(R.id.pgPrev).setOnClickListener { onFlick(-1) }
+        findViewById<Button>(R.id.pgNext).setOnClickListener { onFlick(1) }
         findViewById<Button>(R.id.redo).setOnClickListener { redo() }
         lastJson = snapshot()
         findViewById<Button>(R.id.penDone).setOnClickListener { switchMode(PageView.Mode.VIEW) }
@@ -277,6 +280,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             mBpm.clearFocus()
         }
         mBpm.setOnEditorActionListener { _, _, _ -> applyTyped(); true }
+        findViewById<Button>(R.id.mOk).setOnClickListener { applyTyped() }
         mBpm.setOnFocusChangeListener { _, has -> if (!has) { mBpm.text.toString().toIntOrNull()?.let { metro.bpm = it.coerceIn(20, 300) }; show() } }
         mPlay.setOnClickListener {
             if (metro.isRunning) { metro.stop(); mPlay.text = "▶ 시작"; mBpm.setBackgroundColor(Color.TRANSPARENT) }
@@ -403,7 +407,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             text = sounds[data.playSound]
             setOnClickListener { data.playSound = (data.playSound + 1) % 3; text = sounds[data.playSound]; Store.saveData(this@ViewerActivity, score.id, data) }
         }))
-        row1.addView(TextView(this).apply { text = "  ♩=${metro.bpm}"; textSize = 13f })
+        row1.addView(TextView(this).apply { text = "  ♩=${xmlTempo(this@ViewerActivity, data, sc)}"; textSize = 13f })
         val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
         row2.addView(TextView(this).apply { text = " 마디 "; textSize = 13f })
         val from = EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER; hint = "처음"; textSize = 14f; minEms = 2 }
@@ -416,7 +420,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             if (players.isNotEmpty()) { stopPlay(); play.text = "▶ 재생"; return@setOnClickListener }
             val ch = PlayChoice(data.playHands, from.text.toString().toIntOrNull() ?: 0, to.text.toString().toIntOrNull() ?: 0, loop.isChecked)
             play.text = "준비 중…"; play.isEnabled = false
-            val sound = data.playSound; val bpm = metro.bpm
+            val sound = data.playSound; val bpm = xmlTempo(this, data, sc)
             Thread {
                 val err = try {
                     val tl = Timeline.build(sc, ch, bpm)
@@ -677,7 +681,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private val redoStack = ArrayDeque<String>()
 
     /** snapshot without view-only state (page, visibility toggles don't count as edits) */
-    private fun snapshot(): String = Store.toJson(data).apply { remove("lastPage"); remove("bpm"); remove("beats") }.toString()
+    private fun snapshot(): String = Store.toJson(data).apply { remove("lastPage"); remove("bpm"); remove("beats"); remove("xmlBpm") }.toString()
 
     private fun save() {
         val now = snapshot()
@@ -689,8 +693,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     }
 
     private fun restore(json: String) {
-        val page = data.lastPage; val bpm = data.bpm; val beats = data.beats
-        data = Store.parse(json); data.lastPage = page; data.bpm = bpm; data.beats = beats; lastJson = json
+        val page = data.lastPage; val bpm = data.bpm; val beats = data.beats; val xb = data.xmlBpm
+        data = Store.parse(json); data.lastPage = page; data.bpm = bpm; data.beats = beats; data.xmlBpm = xb; lastJson = json
         Store.saveData(this, score.id, data)
         refreshFixes(); updatePracticeBar(); redraw()
     }
@@ -706,6 +710,11 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     }
 
     override fun onUndoGesture() = undo()
+    override fun onFlick(dir: Int) {
+        val n = pager.adapter?.itemCount ?: return
+        val t = pager.currentItem + dir
+        if (t in 0 until n) pager.setCurrentItem(t, true) else toast(if (dir > 0) "마지막 페이지입니다" else "첫 페이지입니다")
+    }
 
     // ---- colour swatches (show the colour itself, not its name)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -818,6 +827,18 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         }
 
         override fun getItemCount() = screens()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // the XML screen saves its own tempo / hands / sound choice: pick them up so this screen doesn't overwrite them
+        if (::score.isInitialized && ::data.isInitialized && ::playBar.isInitialized) {
+            val disk = Store.loadData(this, score.id)
+            if (data.xmlBpm != disk.xmlBpm || data.playHands != disk.playHands || data.playSound != disk.playSound) {
+                data.xmlBpm = disk.xmlBpm; data.playHands = disk.playHands; data.playSound = disk.playSound
+                if (playBar.visibility == View.VISIBLE) buildPlayBar()
+            }
+        }
     }
 
     override fun onPause() { super.onPause(); stopPlay(); save(); Thread { Backup.sync(applicationContext) }.start(); if (metro.isRunning) { metro.stop(); mPlay.text = "▶ 시작" } }
