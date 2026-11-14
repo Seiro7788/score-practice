@@ -49,6 +49,10 @@ class PageView(context: Context, private val host: Host) : View(context) {
         fun onFingerRemove(f: Finger)
         fun onFingerMoved(f: Finger)
         fun onFingerExit()
+        val fingerTool: Int                  // 0 = put numbers in, 1 = copy (draw a box), 2 = paste
+        val fingerClip: List<Finger>         // copied numbers: x, y relative to the copy's first number
+        fun onFingerCopy(page: Int, x0: Float, y0: Float, x1: Float, y1: Float)
+        fun onFingerPaste(page: Int, x: Float, y: Float)
         fun onUndoGesture()
         fun onFlick(dir: Int)   // +1 next page, -1 previous
         val fixAreaErase: Boolean   // colour-fix mode: drag a box to remove the colours inside it
@@ -314,6 +318,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
         c.save(); c.clipRect(segRects[i])
         c.drawBitmap(b, null, dst, bmpPaint)
         drawFixes(c, segs[i].page)
+        if (segs[i].page == page) drawPasteGhost(c)
         placing?.let { pl -> if (page == segs[i].page) {
             val (r, rb) = typicalHead(page); val n = cNow; val s0 = cStart
             val k = if (n != null && s0 != null && hypot(n.first - s0.first, n.second - s0.second) >= 30f) colourChoice(n.first - s0.first, n.second - s0.second) else -2
@@ -368,6 +373,20 @@ class PageView(context: Context, private val host: Host) : View(context) {
     }
 
     /** fan of the five numbers around the pressed point while swiping */
+    private var pastePos: Pair<Float, Float>? = null
+
+    private fun drawPasteGhost(c: Canvas) {
+        val p0 = pastePos ?: return
+        if (host.mode != Mode.FINGER || host.fingerTool != 2) return
+        val ax = nx(p0.first); val ay = ny(p0.second)
+        val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; isFakeBoldText = true; color = Color.argb(170, 220, 0, 90) }
+        for (g in host.fingerClip) {
+            val ts = g.s * dst.width() * 1.7f * host.data.fingerScale; tp.textSize = ts
+            c.drawText(g.n.toString(), sx(ax + g.x), sy(ay + g.y) + ts * 0.36f, tp)
+        }
+        mark.strokeWidth = 3f / z; c.drawCircle(sx(ax), sy(ay), 10f / z, mark); mark.strokeWidth = 3f
+    }
+
     private fun drawFingerGuide(c: Canvas) {
         val s0 = fStart ?: return; val n = fNow ?: return
         if (fDragging || host.mode != Mode.FINGER) return
@@ -438,6 +457,27 @@ class PageView(context: Context, private val host: Host) : View(context) {
         when (host.mode) {
             Mode.PEN -> return penTouch(e)
             Mode.FINGER -> {
+                if (host.fingerTool == 1) {          // copy: box around the numbers to copy
+                    when (am) {
+                        MotionEvent.ACTION_DOWN -> { downX = e.x; downY = e.y; dragStart = nx(e.x) to ny(e.y); dragNow = dragStart; invalidate() }
+                        MotionEvent.ACTION_MOVE -> { dragNow = nx(e.x) to ny(e.y); invalidate() }
+                        MotionEvent.ACTION_UP -> {
+                            val a = dragStart; val b = nx(e.x) to ny(e.y); dragStart = null; dragNow = null; invalidate()
+                            if (a != null) host.onFingerCopy(page, minOf(a.first, b.first), minOf(a.second, b.second), maxOf(a.first, b.first), maxOf(a.second, b.second))
+                        }
+                        MotionEvent.ACTION_CANCEL -> { dragStart = null; dragNow = null; invalidate() }
+                    }
+                    return true
+                }
+                if (host.fingerTool == 2) {          // paste: the copied numbers follow above the finger, let go to put them there
+                    val lift = 110f
+                    when (am) {
+                        MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> { pastePos = e.x to (e.y - lift); invalidate() }
+                        MotionEvent.ACTION_UP -> { val p0 = e.x to (e.y - lift); pastePos = null; invalidate(); host.onFingerPaste(page, nx(p0.first), ny(p0.second)) }
+                        MotionEvent.ACTION_CANCEL -> { pastePos = null; invalidate() }
+                    }
+                    return true
+                }
                 when (am) {
                     MotionEvent.ACTION_DOWN -> {
                         downT = e.eventTime; fStart = e.x to e.y; fNow = fStart; fDragging = false

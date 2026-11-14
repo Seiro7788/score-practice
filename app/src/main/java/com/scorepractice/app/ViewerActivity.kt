@@ -219,6 +219,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         if (m == PageView.Mode.FIX && !data.showFixes) { data.showFixes = true; redraw() }
         btnRange.text = if (m == PageView.Mode.RANGE) "연습 끝" else "연습"
         if (m == PageView.Mode.RANGE) toast("연습할 부분을 손가락으로 끌어 네모를 그리세요")
+        if (m != PageView.Mode.FINGER && fingerTool != 0) setFingerTool(0)
         if (m == PageView.Mode.FINGER) { fingerLayerLabel?.invoke(); data.layer(data.activeLayer)?.let { if (!it.visible) { it.visible = true; redraw() } } }
         if (m == PageView.Mode.PEN) { penLayerLabel?.invoke(); data.layer(data.activeLayer)?.let { if (!it.visible) { it.visible = true; redraw() } }; erasing = false; if (!data.showInk) { data.showInk = true; redraw() } }
         if (m == PageView.Mode.VIEW) save()
@@ -451,6 +452,16 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private fun setupFinger() {
         fingerBar = findViewById(R.id.fingerBar)
         findViewById<Button>(R.id.fingerSmaller).setOnClickListener { fingerSize(0.88f) }
+        val fb = findViewById<LinearLayout>(R.id.fingerBar)
+        copyBtn = Button(this).apply { text = "복사"; isAllCaps = false; minWidth = 0; minimumWidth = 0; textSize = 13f
+            setOnClickListener { if (fingerTool == 1) setFingerTool(0) else { setFingerTool(1); toast("복사할 손번호들을 네모로 감싸세요") } } }
+        pasteBtn = Button(this).apply { text = "붙여넣기"; isAllCaps = false; minWidth = 0; minimumWidth = 0; textSize = 13f
+            setOnClickListener {
+                if (fingerClip.isEmpty()) { toast("먼저 [복사]로 손번호를 고르세요"); return@setOnClickListener }
+                setFingerTool(if (fingerTool == 2) 0 else 2)
+                if (fingerTool == 0) toast("붙여넣기 끝 — 다시 손번호 넣기")
+            } }
+        fb.addView(copyBtn, fb.childCount - 2); fb.addView(pasteBtn, fb.childCount - 2)
         findViewById<Button>(R.id.fingerBigger).setOnClickListener { fingerSize(1.14f) }
         findViewById<Button>(R.id.btnFinger).setOnClickListener {
             switchMode(if (mode == PageView.Mode.FINGER) PageView.Mode.VIEW else PageView.Mode.FINGER)
@@ -467,6 +478,36 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     override fun onFingerRemove(f: Finger) { data.fingers.remove(f); save(); redraw() }
     override fun onFingerMoved(f: Finger) { save(); redraw() }
     override fun onFingerExit() { switchMode(PageView.Mode.VIEW); toast("손번호 입력 끝") }
+
+    // ---- copy fingering from one passage and paste it on the same figure elsewhere
+    override var fingerTool = 0
+    override var fingerClip: List<Finger> = emptyList()
+    private var copyBtn: Button? = null
+    private var pasteBtn: Button? = null
+
+    private fun setFingerTool(t: Int) {
+        fingerTool = t
+        copyBtn?.setTextColor(if (t == 1) Color.rgb(200, 30, 30) else Color.BLACK)
+        pasteBtn?.setTextColor(if (t == 2) Color.rgb(200, 30, 30) else Color.BLACK)
+        pasteBtn?.text = if (fingerClip.isEmpty()) "붙여넣기" else "붙여넣기 (${fingerClip.size})"
+    }
+
+    override fun onFingerCopy(page: Int, x0: Float, y0: Float, x1: Float, y1: Float) {
+        val got = data.fingers.filter { it.page == page && it.x in x0..x1 && it.y in y0..y1 && data.fingerVisible(it) }
+        if (got.isEmpty()) { toast("네모 안에 손번호가 없습니다"); return }
+        val a = got.minWith(compareBy({ it.x }, { it.y }))
+        fingerClip = got.map { it.copy(x = it.x - a.x, y = it.y - a.y) }
+        setFingerTool(2)
+        toast("손번호 ${got.size}개 복사 — 같은 음형의 첫 음표 위로 끌어 놓으세요 (손가락 위에 미리 보기가 따라옵니다)")
+    }
+
+    override fun onFingerPaste(page: Int, x: Float, y: Float) {
+        if (fingerClip.isEmpty()) return
+        val s0 = data.fingerSize()
+        for (g in fingerClip) data.fingers.add(Finger(page, x + g.x, y + g.y, g.n, s0 ?: g.s, data.activeLayer))
+        save(); redraw()
+        toast("손번호 ${fingerClip.size}개를 붙였습니다 — 또 붙이려면 다른 곳을 누르세요 (↶ 되돌리기)")
+    }
 
     private fun refreshFixes() { pages.values.forEach { it.refreshFixes() } }
 
