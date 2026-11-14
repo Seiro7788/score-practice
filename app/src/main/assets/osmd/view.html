@@ -164,41 +164,58 @@
   }
   function toggleDyn(on) { document.getElementById('osmd').classList.toggle('nodyn', !on); }
 
-  // main melody: a yellow highlighter line behind the notes, joining the top notes of the upper staff;
-  // it breaks at rests and at line ends (phrase by phrase)
+  // melodic lines from the voices written in the score (MusicXML voices): one highlighter line per voice,
+  // drawn behind the notes. Upper staff: top note of each chord; lower staff: bottom note (bass line).
+  // Colours: upper staff main voice yellow, its other voices orange / pink; lower staff cyan / green / violet.
+  // Within a line the colour is lighter an octave up and darker an octave down. Lines break at rests and line ends.
   function drawMelody(on) {
     document.querySelectorAll('.melody').forEach(e => e.remove());
     if (!on) return;
-    const svg = svgEl(), ns = 'http://www.w3.org/2000/svg';
-    const u = 10;   // inside the score's own SVG drawing: 10 per unit (zoom is applied by the SVG itself)
-    const ml = osmd.GraphicSheet.MeasureList, phrases = []; let cur = [], lastTop = null;
+    const svg = svgEl(), ns = 'http://www.w3.org/2000/svg', u = 10;   // the score's own SVG units
+    const ml = osmd.GraphicSheet.MeasureList, nStaves = Math.max(...ml.map(m => (m || []).length));
+    const voices = {};     // key "staff|voice" -> {staff, pts: [[x, y, midi, sys] | null(break)]}
     for (let i = 0; i < ml.length; i++) {
-      const gm = (ml[i] || [])[0]; if (!gm) continue;
-      const top = Math.round(gm.PositionAndShape.AbsolutePosition.y);
-      if (lastTop !== null && top !== lastTop && cur.length) { phrases.push(cur); cur = []; }   // new line of music
-      lastTop = top;
-      const entries = [...gm.staffEntries].sort((a, b) => a.PositionAndShape.AbsolutePosition.x - b.PositionAndShape.AbsolutePosition.x);
-      for (const se of entries) {
-        let best = null, rest = true;
-        for (const gve of se.graphicalVoiceEntries) for (const gn of gve.notes) {
-          const n = gn.sourceNote; if (!n || n.isRest()) continue;
-          rest = false;
-          if (!best || n.halfTone > best.sourceNote.halfTone) best = gn;
+      const sys = Math.round(((ml[i] || [])[0] || { PositionAndShape: { AbsolutePosition: { y: 0 } } }).PositionAndShape.AbsolutePosition.y);
+      for (let st = 0; st < (ml[i] || []).length; st++) {
+        const gm = ml[i][st]; if (!gm) continue;
+        const entries = [...gm.staffEntries].sort((a, b) => a.PositionAndShape.AbsolutePosition.x - b.PositionAndShape.AbsolutePosition.x);
+        for (const se of entries) for (const gve of se.graphicalVoiceEntries) {
+          const pv = gve.parentVoiceEntry && gve.parentVoiceEntry.ParentVoice;
+          const key = st + '|' + (pv ? pv.VoiceId : 0);
+          const v = voices[key] || (voices[key] = { staff: st, pts: [] });
+          const ns2 = gve.notes.filter(g => g.sourceNote && !g.sourceNote.isRest());
+          if (!ns2.length) { v.pts.push(null); continue; }                       // rest: phrase ends
+          const lowStaff = st > 0 && st === nStaves - 1 || (nStaves === 2 && st === 1);
+          const pick = ns2.reduce((a, b) => (lowStaff ? b.sourceNote.halfTone < a.sourceNote.halfTone : b.sourceNote.halfTone > a.sourceNote.halfTone) ? b : a);
+          const p = pick.PositionAndShape.AbsolutePosition;
+          v.pts.push([(p.x + 0.6) * u, p.y * u, pick.sourceNote.halfTone, sys]);
         }
-        if (rest) { if (cur.length) { phrases.push(cur); cur = []; } continue; }   // a rest ends the phrase
-        const a = best.PositionAndShape.AbsolutePosition;
-        cur.push([(a.x + 0.6) * u, a.y * u]);
       }
     }
-    if (cur.length) phrases.push(cur);
-    for (const ph of phrases) {
-      if (ph.length < 2) continue;
-      const path = document.createElementNS(ns, 'path');
-      path.setAttribute('d', 'M' + ph.map(p => p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' L'));
-      path.setAttribute('class', 'melody');
-      path.setAttribute('fill', 'none'); path.setAttribute('stroke', '#FFD400'); path.setAttribute('stroke-opacity', '0.55');
-      path.setAttribute('stroke-width', (1.1 * u).toFixed(1)); path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
-      svg.insertBefore(path, svg.firstChild);        // behind everything: the notes stay fully visible
+    // keep real voices (not a few stray notes); rank them per staff by height
+    const all = Object.values(voices), total = all.reduce((t, v) => t + v.pts.filter(Boolean).length, 0);
+    const kept = all.filter(v => v.pts.filter(Boolean).length >= Math.max(12, total * 0.03));
+    for (const v of kept) { const m = v.pts.filter(Boolean).map(p => p[2]); v.mean = m.reduce((a, b) => a + b, 0) / m.length; }
+    const HUES = { upper: [[50, 100, 52], [28, 100, 58], [330, 85, 66]], lower: [[192, 85, 55], [120, 55, 50], [270, 60, 65]] };
+    const staves = [...new Set(kept.map(v => v.staff))].sort((a, b) => a - b);
+    for (const st of staves) {
+      const group = kept.filter(v => v.staff === st).sort((a, b) => b.mean - a.mean);
+      const pal = st === staves[0] ? HUES.upper : HUES.lower;
+      group.forEach((v, gi) => {
+        const [h, sat, l0] = pal[gi % pal.length];
+        for (let i = 0; i + 1 < v.pts.length; i++) {
+          const a = v.pts[i], b = v.pts[i + 1];
+          if (!a || !b || a[3] !== b[3] || b[0] < a[0]) continue;              // rest, new line of music, or wrapped
+          const oct = ((a[2] + b[2]) / 2 - v.mean) / 12;                        // +1 = an octave above the voice's middle
+          const L = Math.max(25, Math.min(85, l0 + 14 * oct));
+          const ln = document.createElementNS(ns, 'line');
+          ln.setAttribute('x1', a[0].toFixed(1)); ln.setAttribute('y1', a[1].toFixed(1));
+          ln.setAttribute('x2', b[0].toFixed(1)); ln.setAttribute('y2', b[1].toFixed(1));
+          ln.setAttribute('class', 'melody'); ln.setAttribute('stroke', `hsl(${h},${sat}%,${L}%)`);
+          ln.setAttribute('stroke-opacity', '0.6'); ln.setAttribute('stroke-width', '9'); ln.setAttribute('stroke-linecap', 'round');
+          svg.insertBefore(ln, svg.firstChild);                                  // behind the notes
+        }
+      });
     }
   }
   let melodyOn = true;

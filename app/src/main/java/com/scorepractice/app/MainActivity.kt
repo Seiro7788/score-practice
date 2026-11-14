@@ -76,6 +76,7 @@ class MainActivity : AppCompatActivity() {
         menu.add(0, 1, 0, "저장 폴더 지정 (앱을 지워도 남음)")
         menu.add(0, 2, 1, "백업 파일 만들기 (구글드라이브 등)")
         menu.add(0, 3, 2, "백업 불러오기")
+        menu.add(0, 4, 3, "앱 정보")
         return true
     }
 
@@ -83,6 +84,12 @@ class MainActivity : AppCompatActivity() {
         when (item.itemId) {
             1 -> pickFolder.launch(null)
             2 -> makeBackup.launch("오선노트_백업_" + java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.KOREA).format(java.util.Date()) + ".zip")
+            4 -> {
+                val ver = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (e: Exception) { "" }
+                AlertDialog.Builder(this).setTitle(getString(R.string.app_name))
+                    .setMessage("피아노 악보 보기 · 연습 기록 · 반음 색칠 · 연주와 계이름 노래\n\n버전 $ver\n\n제작자: 임종철\nsmartrain7788@gmail.com")
+                    .setPositiveButton("확인", null).show()
+            }
             3 -> loadBackup.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed"))
             else -> return super.onOptionsItemSelected(item)
         }
