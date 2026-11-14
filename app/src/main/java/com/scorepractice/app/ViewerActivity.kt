@@ -416,6 +416,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     override fun onFixExit() { switchMode(PageView.Mode.VIEW); toast("색 고치기 끝") }
     override fun onFixInfo(t: String) = fixInfo(t)
+    override fun onFixesRestore(l: List<Fix>) { data.fixes.clear(); data.fixes.addAll(l); save(); refreshFixes() }
     override var fixPlace = 0
     private lateinit var placeBtn: Button
 

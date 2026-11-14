@@ -46,6 +46,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
         fun onFixMoved(old: Fix, x: Float, y: Float)
         fun onFixExit()
         fun onFixInfo(t: String)
+        fun onFixesRestore(l: List<Fix>)
         val fixPalette: List<Int>      // black, ♯ black key, ♯ white key, ♭ black key, ♭ white key, × black key, × white key
         fun onFingerAdd(f: Finger)
         fun onFingerRemove(f: Finger)
@@ -619,25 +620,30 @@ class PageView(context: Context, private val host: Host) : View(context) {
     }
 
     private var armed: Fix? = null          // double-tapped hand-placed head, waiting to be dragged
+    // taps act at once; if a second / third tap follows, what the first tap did is put back
     private var fTaps = 0; private var fTapT = 0L; private var fTapX = 0f; private var fTapY = 0f
-    private val fTapDone = Runnable {
-        val n = fTaps; fTaps = 0
+    private var fSeq = 0; private var fCancelled = -1
+    private var fBefore: List<Fix> = emptyList()
+    private fun fixTapCount(e: MotionEvent) {
+        if (fTaps > 0 && e.eventTime - fTapT < 400 && hypot(e.x - fTapX, e.y - fTapY) < 90f) fTaps++
+        else { fTaps = 1; fTapX = e.x; fTapY = e.y; fSeq++; fBefore = host.data.fixes.toList() }
+        fTapT = e.eventTime
         val x = nx(fTapX); val y = ny(fTapY)
-        val near = host.data.fixes.filter { it.page == page && abs(it.x - x) < it.r * 1.4f && abs((it.y - y) * dst.height() / dst.width()) < it.rb * 1.8f }
+        val near = fBefore.filter { it.page == page && abs(it.x - x) < it.r * 1.4f && abs((it.y - y) * dst.height() / dst.width()) < it.rb * 1.8f }
             .minByOrNull { abs(it.x - x) + abs(it.y - y) }
         when {
-            n >= 3 && near == null -> host.onFixExit()                         // three taps on an empty spot: done
-            n == 2 && near != null && near.manual -> { armed = near; invalidate()
-                host.onFixInfo("옮길 음표를 골랐습니다 — 끌어서 놓으세요") }
-            else -> findHead(fTapX, fTapY) { pg, xx, yy, head, w, h -> host.onFixTap(pg, xx, yy, head, w, h) }
+            fTaps == 1 -> { val seq = fSeq
+                findHead(fTapX, fTapY) { pg, xx, yy, head, w, h -> if (seq != fCancelled) host.onFixTap(pg, xx, yy, head, w, h) } }
+            fTaps == 2 && near != null && near.manual -> {        // double tap on a hand-placed head: undo the tap, pick it up
+                fCancelled = fSeq; host.onFixesRestore(fBefore)
+                armed = near; invalidate(); host.onFixInfo("옮길 음표를 골랐습니다 — 끌어서 놓으세요")
+            }
+            fTaps == 3 && near == null -> {                       // three taps on an empty spot: done
+                fCancelled = fSeq; if (host.data.fixes != fBefore) host.onFixesRestore(fBefore)
+                fTaps = 0; host.onFixExit()
+            }
+            else -> {}
         }
-    }
-    private fun fixTapCount(e: MotionEvent) {
-        if (fTaps > 0 && e.eventTime - fTapT < 380 && hypot(e.x - fTapX, e.y - fTapY) < 90f) fTaps++
-        else { fTaps = 1; fTapX = e.x; fTapY = e.y }
-        fTapT = e.eventTime
-        removeCallbacks(fTapDone)
-        if (fTaps >= 3) post(fTapDone) else postDelayed(fTapDone, 330)
     }
     private var moving: Fix? = null
     private var placing: Pair<Float, Float>? = null
