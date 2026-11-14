@@ -127,4 +127,17 @@ object HeadFix {
         }
         bm.setPixels(pix, 0, ww, x0, y0, ww, hh)
     }
+
+    /** a hand-placed head: a tilted ellipse in the colour (ring for a hollow head), drawn in pixel geometry */
+    fun drawManual(c: android.graphics.Canvas, cx: Float, cy: Float, a: Float, b: Float, hollow: Boolean, color: Int) {
+        val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = color
+            style = if (hollow) android.graphics.Paint.Style.STROKE else android.graphics.Paint.Style.FILL
+            strokeWidth = b * 0.42f
+        }
+        c.save(); c.rotate(Math.toDegrees(ANG).toFloat(), cx, cy)
+        val ra = if (hollow) a - p.strokeWidth / 2 else a; val rb = if (hollow) b - p.strokeWidth / 2 else b
+        c.drawOval(cx - ra, cy - rb, cx + ra, cy + rb, p)
+        c.restore()
+    }
 }

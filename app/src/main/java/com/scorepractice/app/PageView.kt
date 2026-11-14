@@ -40,6 +40,9 @@ class PageView(context: Context, private val host: Host) : View(context) {
         fun onInkChanged()
         fun onZoomChanged(zoomed: Boolean)
         fun onFixTap(page: Int, x: Float, y: Float, head: HeadFix.Head?, w: Int, h: Int, color: Int? = null)
+        val fixPlace: Int              // 0 = find the note, 1 = place a hollow head by hand, 2 = place a filled head
+        fun onFixPlace(page: Int, x: Float, y: Float, r: Float, rb: Float, hollow: Boolean)
+        fun onFixMoved(old: Fix, x: Float, y: Float)
         val fixPalette: List<Int>      // black, ♯ black key, ♯ white key, ♭ black key, ♭ white key, × black key, × white key
         fun onFingerAdd(f: Finger)
         fun onFingerRemove(f: Finger)
@@ -118,6 +121,8 @@ class PageView(context: Context, private val host: Host) : View(context) {
         val k = dst.width() / o.width
         val r = RectF()
         for (f in host.data.fixes) if (f.page == p) {
+            if (f === moving) continue
+            if (f.manual) { HeadFix.drawManual(c, sx(f.x), sy(f.y), f.r * dst.width(), f.rb * dst.width(), f.hollow, f.color); continue }
             val (bm, box) = spriteOf(f, o) ?: continue
             r.set(dst.left + box.left * k, dst.top + box.top * k, dst.left + box.right * k, dst.top + box.bottom * k)
             c.drawBitmap(bm, null, r, bmpPaint)
@@ -289,6 +294,9 @@ class PageView(context: Context, private val host: Host) : View(context) {
         c.save(); c.clipRect(segRects[i])
         c.drawBitmap(b, null, dst, bmpPaint)
         drawFixes(c, segs[i].page)
+        moving?.let { mv -> val p0 = movePos; if (mv.page == segs[i].page && p0 != null) {
+            HeadFix.drawManual(c, sx(p0.first), sy(p0.second), mv.r * dst.width(), mv.rb * dst.width(), mv.hollow, mv.color)
+            mark.strokeWidth = 3f / z; c.drawCircle(sx(p0.first), sy(p0.second), mv.r * dst.width() * 1.6f, mark); mark.strokeWidth = 3f } }
         for (r in visibleRanges()) {
             val col = host.data.layer(r.layer)?.color ?: Color.RED
             val done = r.count >= r.target && r.target > 0
@@ -448,6 +456,29 @@ class PageView(context: Context, private val host: Host) : View(context) {
                         }
                     }
                 }
+                // hold a coloured note still for a moment = pick it up, then drag it where it belongs
+                if (am == MotionEvent.ACTION_DOWN && !host.fixAreaErase) {
+                    moving = null; movePos = null
+                    val x = nx(e.x); val y = ny(e.y)
+                    val near = host.data.fixes.filter { it.page == page && abs(it.x - x) < it.r * 1.4f && abs((it.y - y) * dst.height() / dst.width()) < it.rb * 1.8f }
+                        .minByOrNull { abs(it.x - x) + abs(it.y - y) }
+                    if (near != null) {
+                        val r = Runnable { if (hypot(lastMoveX - downX, lastMoveY - downY) < 15f) { moving = near; movePos = near.x to near.y; cStart = null; cNow = null
+                            performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); invalidate() } }
+                        pickUp = r; lastMoveX = e.x; lastMoveY = e.y; postDelayed(r, 380)
+                    }
+                }
+                if (am == MotionEvent.ACTION_MOVE) { lastMoveX = e.x; lastMoveY = e.y }
+                if (am == MotionEvent.ACTION_UP || am == MotionEvent.ACTION_CANCEL) { pickUp?.let { removeCallbacks(it) }; pickUp = null }
+                moving?.let { mv ->
+                    val start = mv.x to mv.y
+                    when (am) {
+                        MotionEvent.ACTION_MOVE -> { movePos = (start.first + (e.x - downX) / dst.width()) to (start.second + (e.y - downY) / dst.height()); invalidate() }
+                        MotionEvent.ACTION_UP -> { val p0 = movePos; moving = null; movePos = null; invalidate(); if (p0 != null) host.onFixMoved(mv, p0.first, p0.second) }
+                        MotionEvent.ACTION_CANCEL -> { moving = null; movePos = null; invalidate() }
+                    }
+                    return true
+                }
                 if (am == MotionEvent.ACTION_DOWN) { cStart = e.x to e.y; cNow = null; invalidate() }
                 if (am == MotionEvent.ACTION_MOVE && !host.fixAreaErase && cStart != null) { cNow = e.x to e.y; invalidate() }
                 if (am == MotionEvent.ACTION_CANCEL) { cStart = null; cNow = null; invalidate() }
@@ -461,7 +492,11 @@ class PageView(context: Context, private val host: Host) : View(context) {
                 }
                 if (am == MotionEvent.ACTION_UP) { cStart = null; cNow = null; invalidate() }
                 if (am == MotionEvent.ACTION_UP && hypot(e.x - downX, e.y - downY) < 20f) {
-                    findHead(e.x, e.y) { pg, x, y, head, w, h -> host.onFixTap(pg, x, y, head, w, h) }
+                    if (host.fixPlace > 0 && !host.fixAreaErase) {
+                        // by hand: a head the size of the others on this page, exactly where tapped
+                        val (r, rb) = typicalHead(page)
+                        host.onFixPlace(page, nx(e.x), ny(e.y), r, rb, host.fixPlace == 1)
+                    } else findHead(e.x, e.y) { pg, x, y, head, w, h -> host.onFixTap(pg, x, y, head, w, h) }
                 }
                 return true
             }
@@ -494,6 +529,20 @@ class PageView(context: Context, private val host: Host) : View(context) {
     private fun isFlick(e: MotionEvent, maxMs: Long): Boolean {
         val dx = e.x - downX; val dy = e.y - downY
         return e.eventTime - downT <= maxMs && abs(dx) > width * 0.28f && abs(dy) < abs(dx) * 0.45f
+    }
+
+    private var moving: Fix? = null
+    private var movePos: Pair<Float, Float>? = null
+    private var pickUp: Runnable? = null
+    private var lastMoveX = 0f; private var lastMoveY = 0f
+
+    /** head size (normalized to page width) of the notes already coloured on this page, else from the staff spacing */
+    private fun typicalHead(p: Int): Pair<Float, Float> {
+        val fx = host.data.fixes.filter { it.page == p && !it.manual }
+        if (fx.size >= 3) { val rs = fx.map { it.r }.sorted(); val rbs = fx.map { it.rb }.sorted(); return rs[rs.size / 2] to rbs[rbs.size / 2] }
+        val o = origs[p] ?: return 0.0085f * 0.66f to 0.0085f * 0.47f
+        val sp = synchronized(sps) { sps.getOrPut(p) { HeadFix.staffSpace(o) } }
+        return 0.66f * sp / o.width to 0.47f * sp / o.width
     }
 
     /** find the note head at a screen point off the screen thread, then report it on the screen thread */

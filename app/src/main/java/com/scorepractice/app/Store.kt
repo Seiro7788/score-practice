@@ -36,7 +36,8 @@ data class Range(
 
 /** colour correction on an already-coloured score: a notehead-shaped patch (normalized coords, r = width/page width) */
 data class Fix(val page: Int, val x: Float, val y: Float, val r: Float, val color: Int, val hollow: Boolean, val rb: Float = r * 0.71f,
-               val auto: Boolean = false)   // auto = made by automatic colouring
+               val auto: Boolean = false,
+               val manual: Boolean = false)   // manual = placed by hand (drawn as a coloured head shape, not by recolouring ink)   // auto = made by automatic colouring
 
 /** fingering number placed by the user: centre (normalized), s = staff spacing / page width at that time */
 data class Finger(val page: Int, var x: Float, var y: Float, val n: Int, val s: Float)
@@ -148,7 +149,7 @@ object Store {
                 val f = fa.getJSONObject(i)
                 d.fixes.add(Fix(f.getInt("page"), f.getDouble("x").toFloat(), f.getDouble("y").toFloat(),
                     f.getDouble("r").toFloat(), f.getInt("color"), f.optBoolean("hollow"),
-                    f.optDouble("rb", f.getDouble("r") * 0.71).toFloat(), f.optBoolean("auto")))
+                    f.optDouble("rb", f.getDouble("r") * 0.71).toFloat(), f.optBoolean("auto"), f.optBoolean("manual")))
             }
             d.showFixes = o.optBoolean("showFixes", true)
             val ga = o.optJSONArray("fingers") ?: JSONArray()
@@ -198,7 +199,7 @@ object Store {
         o.put("fixes", JSONArray().apply {
             d.fixes.forEach { f ->
                 put(JSONObject().put("page", f.page).put("x", f.x.toDouble()).put("y", f.y.toDouble())
-                    .put("r", f.r.toDouble()).put("rb", f.rb.toDouble()).put("color", f.color).put("hollow", f.hollow).put("auto", f.auto))
+                    .put("r", f.r.toDouble()).put("rb", f.rb.toDouble()).put("color", f.color).put("hollow", f.hollow).put("auto", f.auto).put("manual", f.manual))
             }
         })
         o.put("showFixes", d.showFixes)

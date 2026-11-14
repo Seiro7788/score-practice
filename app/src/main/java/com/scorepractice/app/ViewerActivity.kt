@@ -188,6 +188,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         mode = m
         updateUndoBox()
         if (m != PageView.Mode.FIX && fixAreaErase && ::areaBtn.isInitialized) areaBtn.performClick()
+        if (m != PageView.Mode.FIX && fixPlace != 0 && ::placeBtn.isInitialized) { fixPlace = 2; placeBtn.performClick() }
         pager.isUserInputEnabled = m == PageView.Mode.VIEW
         penBar.visibility = if (m == PageView.Mode.PEN) View.VISIBLE else View.GONE
         fixBar.visibility = if (m == PageView.Mode.FIX) View.VISIBLE else View.GONE
@@ -338,9 +339,36 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             }
         }
         row.addView(areaBtn, row.childCount - 1)
+        // place a head by hand where the note isn't found (size taken from the other notes on the page)
+        placeBtn = Button(this).apply {
+            text = "직접 놓기"; isAllCaps = false
+            setOnClickListener {
+                fixPlace = (fixPlace + 1) % 3
+                text = arrayOf("직접 놓기", "직접: 빈 음표(2분)", "직접: 찬 음표(4분)")[fixPlace]
+                setTextColor(if (fixPlace > 0) Color.rgb(200, 30, 30) else Color.BLACK)
+                if (fixPlace == 1) toast("누른 자리에 빈 음표(2분음표) 모양을 놓습니다. 한 번 더 누르면 찬 음표(4분)")
+            }
+        }
+        row.addView(placeBtn, row.childCount - 1)
     }
 
     override var fixAreaErase = false
+    override var fixPlace = 0
+    private lateinit var placeBtn: Button
+
+    override fun onFixPlace(page: Int, x: Float, y: Float, r: Float, rb: Float, hollow: Boolean) {
+        val hit = data.fixes.filter { it.page == page && kotlin.math.abs(it.x - x) < it.r * 1.1f && kotlin.math.abs(it.y - y) < it.rb * 1.4f * 0.7f }
+            .minByOrNull { kotlin.math.abs(it.x - x) + kotlin.math.abs(it.y - y) }
+        if (hit != null) { data.fixes.remove(hit); save(); redraw(); fixInfo("색을 지웠습니다"); return }
+        data.fixes.add(Fix(page, x, y, r, fixColor, hollow, rb, manual = true)); save(); redraw()
+        fixInfo("${if (hollow) "빈 음표(2분)" else "찬 음표(4분)"}를 놓았습니다 — 꾹 눌러 끌면 옮겨집니다")
+    }
+
+    override fun onFixMoved(old: Fix, x: Float, y: Float) {
+        val i = data.fixes.indexOf(old); if (i < 0) return
+        data.fixes[i] = old.copy(x = x.coerceIn(0f, 1f), y = y.coerceIn(0f, 1f)); save(); pages.values.forEach { it.refreshFixes(old.page) }
+        fixInfo("옮겼습니다 (↶ 로 되돌리기)")
+    }
     private lateinit var areaBtn: Button
 
     override fun onFixArea(page: Int, x0: Float, y0: Float, x1: Float, y1: Float) {

@@ -41,9 +41,11 @@ object PdfExport {
 
     fun drawLayers(bm: Bitmap, d: ScoreData, page: Int, opt: Options) {
         val W = bm.width.toFloat(); val H = bm.height.toFloat()
-        if (opt.fixes) for (f in d.fixes) if (f.page == page)
-            HeadFix.apply(bm, f.x * W, f.y * H, f.r * W, f.rb * W, f.hollow, f.color)
         val c = Canvas(bm)
+        if (opt.fixes) for (f in d.fixes) if (f.page == page) {
+            if (f.manual) HeadFix.drawManual(c, f.x * W, f.y * H, f.r * W, f.rb * W, f.hollow, f.color)
+            else HeadFix.apply(bm, f.x * W, f.y * H, f.r * W, f.rb * W, f.hollow, f.color)
+        }
         fun sx(x: Float) = x * W
         fun sy(y: Float) = y * H
         if (opt.ranges) {
