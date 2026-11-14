@@ -58,6 +58,7 @@ object HeadFix {
         val m = BooleanArray(pix.size) { ink(pix[it]) }
         var best: Head? = null; var bestScore = 0.0
         val reach = sp * 0.9f
+        val step = if (sp > 16f) 2f else 1f
         for (scale in floatArrayOf(0.9f, 1.0f, 1.12f)) {
             val a = 0.66f * sp * scale; val b = 0.47f * sp * scale
             var cy = max(py - reach, y0 + b); while (cy <= min(py + reach, y1 - b)) {
@@ -82,9 +83,9 @@ object HeadFix {
                         if (filled > 0.8 && filled * near > bestScore) { bestScore = filled * near; best = Head(cx, cy, a, b, false) }
                         if (hollowS > 0.35 && (hollowS + 0.3) * near > bestScore) { bestScore = (hollowS + 0.3) * near; best = Head(cx, cy, a, b, true) }
                     }
-                    cx += 1f
+                    cx += step
                 }
-                cy += 1f
+                cy += step
             }
         }
         return best

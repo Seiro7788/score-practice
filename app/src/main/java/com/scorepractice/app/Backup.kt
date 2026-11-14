@@ -173,13 +173,24 @@ object Backup {
             val sdId = scoresDir(c, tree, rootId, kids) ?: return false
             val have = children(c, tree, sdId).associateBy { it.name }
             val keep = mutableSetOf<String>()
+            // only files changed since they were last copied (each copy to a cloud folder is an upload)
+            val p = c.getSharedPreferences(PREF, Context.MODE_PRIVATE); val sk = "synced_$tree"
+            val done = try { org.json.JSONObject(p.getString(sk, "{}")!!) } catch (e: Exception) { org.json.JSONObject() }
+            fun stamp(f: File) = "${f.length()}:${f.lastModified()}"
             for ((name, f) in localFiles(c)) {
-                if (name == "library.json") { write(c, tree, rootId, kids.filter { !it.dir }.associateBy { it.name }, "library.json", "application/json", f); continue }
-                val short = name.removePrefix("scores/"); keep.add(short)
-                val isPdf = short.endsWith(".pdf")
-                if (isPdf && have[short]?.size == f.length()) continue
-                write(c, tree, sdId, have, short, if (isPdf) "application/pdf" else if (short.endsWith(".json")) "application/json" else "application/octet-stream", f)
+                val short = name.removePrefix("scores/")
+                if (name != "library.json") keep.add(short)
+                val there = if (name == "library.json") kids.firstOrNull { !it.dir && it.name == name } else have[short]
+                if (there != null && there.size != 0L && done.optString(name) == stamp(f)) continue
+                if (name == "library.json") write(c, tree, rootId, kids.filter { !it.dir }.associateBy { it.name }, "library.json", "application/json", f)
+                else {
+                    val isPdf = short.endsWith(".pdf")
+                    if (!(isPdf && have[short]?.size == f.length()))
+                        write(c, tree, sdId, have, short, if (isPdf) "application/pdf" else if (short.endsWith(".json")) "application/json" else "application/octet-stream", f)
+                }
+                done.put(name, stamp(f))
             }
+            p.edit().putString(sk, done.toString()).apply()
             for ((n, ch) in have) if (n !in keep && !ch.dir)   // scores deleted on the phone
                 try { DocumentsContract.deleteDocument(c.contentResolver, DocumentsContract.buildDocumentUriUsingTree(tree, ch.id)) } catch (_: Exception) {}
             true

@@ -220,6 +220,8 @@ object Store {
     }
 
     private fun writeSafe(f: File, text: String) {
+        // unchanged: leave the file alone (keeps its date, so the save folder / Drive copy isn't sent again)
+        if (f.exists() && f.length() == text.toByteArray(Charsets.UTF_8).size.toLong() && f.readText() == text) return
         val tmp = File(f.parentFile, f.name + ".tmp")
         tmp.writeText(text); if (!tmp.renameTo(f)) { f.writeText(text); tmp.delete() }
     }

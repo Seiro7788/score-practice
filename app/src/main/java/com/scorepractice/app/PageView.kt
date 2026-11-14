@@ -79,6 +79,8 @@ class PageView(context: Context, private val host: Host) : View(context) {
     // drawn over the page. Adding or removing one never touches the page bitmap, so a tap costs the same anywhere.
     // The page bitmap only bakes in the highlighter (multiply), and is repainted in place when that changes.
     private val sprites = HashMap<Fix, Pair<Bitmap, android.graphics.Rect>?>()
+    @Volatile private var finding = false
+    private val finder = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     fun refreshFixes() { invalidate() }
     fun refreshFixes(p: Int) { invalidate() }
@@ -445,10 +447,17 @@ class PageView(context: Context, private val host: Host) : View(context) {
                 if (am == MotionEvent.ACTION_UP && !host.fixAreaErase && isFlick(e, 600L)) { host.onFlick(if (e.x < downX) 1 else -1); return true }
                 if (am == MotionEvent.ACTION_UP && hypot(e.x - downX, e.y - downY) < 20f) {
                     val o = origs[page]
-                    if (o != null) {
-                        val sp = sps.getOrPut(page) { HeadFix.staffSpace(o) }
-                        val head = HeadFix.detect(o, nx(e.x) * o.width, ny(e.y) * o.height, sp)
-                        host.onFixTap(page, nx(e.x), ny(e.y), head, o.width, o.height)
+                    if (o != null && !finding) {
+                        // finding the note head takes a moment on big pages: do it off the screen thread
+                        finding = true
+                        val x = nx(e.x); val y = ny(e.y); val pg = page
+                        finder.execute {
+                            val head = try {
+                                val sp = synchronized(sps) { sps.getOrPut(pg) { HeadFix.staffSpace(o) } }
+                                HeadFix.detect(o, x * o.width, y * o.height, sp)
+                            } catch (t: Throwable) { null }
+                            post { finding = false; host.onFixTap(pg, x, y, head, o.width, o.height) }
+                        }
                     }
                 }
                 return true

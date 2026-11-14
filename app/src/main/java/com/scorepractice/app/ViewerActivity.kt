@@ -870,7 +870,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     private fun load(pv: PageView, page: Int) {
         cache.get(page)?.let { pv.setOrig(page, it); return }
-        val w = resources.displayMetrics.widthPixels.coerceAtLeast(1080) * 3 / 2
+        val w = (resources.displayMetrics.widthPixels.coerceAtLeast(1080) * 3 / 2).coerceAtMost(2400)   // tablets: bigger pages only cost memory
         exec.execute {
             val bmp = try { synchronized(pdf) {
                 pdf.openPage(page).use { p ->
