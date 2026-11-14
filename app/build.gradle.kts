@@ -10,11 +10,22 @@ android {
         applicationId = "com.scorepractice.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
+        // every GitHub build gets a higher number, so a new APK installs as an update
+        versionCode = 100 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0)
         versionName = "1.0"
     }
+    // one fixed signing key for every build: Android only updates an app signed with the same key
+    signingConfigs {
+        create("fixed") {
+            storeFile = file("oseon.jks")
+            storePassword = "WBrPxvtY4a6pdffH8RO-ZgMg"
+            keyAlias = "oseon"
+            keyPassword = "WBrPxvtY4a6pdffH8RO-ZgMg"
+        }
+    }
     buildTypes {
-        release { isMinifyEnabled = false }
+        getByName("debug") { signingConfig = signingConfigs.getByName("fixed") }
+        release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("fixed") }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
