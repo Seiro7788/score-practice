@@ -354,12 +354,16 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         // tapping a note that was already fixed removes that fix
         val hit = data.fixes.filter { it.page == page && kotlin.math.abs(it.x - x) < it.r * 1.1f && kotlin.math.abs((it.y - y) * h / w) < it.rb * 1.4f }
             .minByOrNull { kotlin.math.abs(it.x - x) + kotlin.math.abs(it.y - y) }
-        if (hit != null) { data.fixes.remove(hit); save(); pages.values.forEach { it.refreshFixes(page) }; return }
+        if (hit != null) { data.fixes.remove(hit); save(); pages.values.forEach { it.refreshFixes(page) }; fixInfo("색을 지웠습니다 (${page + 1}쪽 ${data.fixes.count { it.page == page }}개)"); return }
         if (fixAreaErase) return   // erasing: taps only remove
-        if (head == null) { toast("음표를 찾지 못했습니다. 음표 한가운데를 눌러 주세요"); return }
+        if (head == null) { fixInfo("음표를 찾지 못했습니다 — 음표 한가운데를 눌러 주세요"); return }
         val f = Fix(page, head.x / w, head.y / h, head.a / w, fixColor, head.hollow, head.b / w)
         data.fixes.add(f); save(); pages.values.forEach { it.fixAdded(f) }
+        fixInfo("${if (head.hollow) "빈 음표" else "음표"} 칠함 (${page + 1}쪽 ${data.fixes.count { it.page == page }}개)" + if (!data.showFixes) " — 지금 색 보기가 꺼져 있습니다(레이어)" else "")
     }
+
+    /** what the last tap did, in the colour bar (so a tap that seems to do nothing can be told apart) */
+    private fun fixInfo(t: String) { findViewById<TextView>(R.id.fixInfo)?.text = t }
 
     // ---- fingering numbers
     private fun setupFinger() {
