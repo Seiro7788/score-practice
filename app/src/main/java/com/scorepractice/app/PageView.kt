@@ -456,7 +456,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
                         finder.execute {
                             val head = try {
                                 val sp = synchronized(sps) { sps.getOrPut(pg) { HeadFix.staffSpace(o) } }
-                                HeadFix.detect(o, x * o.width, y * o.height, sp)
+                                HeadFix.find(o, x * o.width, y * o.height, sp)
                             } catch (t: Throwable) { null }
                             mainHandler.post { finding = false; host.onFixTap(pg, x, y, head, o.width, o.height) }
                         }

@@ -25,21 +25,38 @@ object HeadFix {
         return lum < 170 || (sat > 55 && lum < 245)
     }
 
-    /** staff spacing in pixels from long horizontal lines */
+    /** staff spacing in pixels: the most common distance from one thin dark line to the next, measured down many
+     *  columns (works on curved / tilted photos where staff lines are not straight across the page) */
     fun staffSpace(bm: Bitmap): Float {
-        val w = bm.width; val h = bm.height; val row = IntArray(w); val cnt = IntArray(h)
-        for (y in 0 until h) {
-            bm.getPixels(row, 0, w, 0, y, w, 1)
-            var n = 0; for (x in w / 10 until w * 9 / 10) if (lumOf(row[x]) < 160) n++
-            cnt[y] = n
+        val w = bm.width; val h = bm.height
+        val maxD = (w * 0.03f).toInt().coerceAtLeast(8)
+        val hist = IntArray(maxD + 2); val col = IntArray(h)
+        val cols = 80
+        for (k in 0 until cols) {
+            val x = w / 10 + k * (w * 8 / 10) / cols
+            bm.getPixels(col, 0, 1, x, 0, 1, h)
+            var y = 0; var lastTop = -1; var lastLen = 0
+            while (y < h) {
+                if (lumOf(col[y]) < 160) {
+                    val y0 = y; while (y < h && lumOf(col[y]) < 160) y++
+                    val len = y - y0
+                    if (len <= maxD / 4 + 2) {                 // thin: a line, not a note head or a beam
+                        if (lastTop >= 0 && lastLen <= maxD / 4 + 2) { val d = y0 - lastTop; if (d in 4..maxD) hist[d]++ }
+                        lastTop = y0; lastLen = len
+                    } else { lastTop = -1 }
+                } else y++
+            }
         }
-        val thr = (w * 0.8f * 0.5f).toInt()
-        val lines = mutableListOf<Float>(); var y = 0
-        while (y < h) {
-            if (cnt[y] > thr) { val y0 = y; while (y < h && cnt[y] > thr) y++; lines.add((y0 + y - 1) / 2f) } else y++
-        }
-        val d = lines.zipWithNext { a, b -> b - a }.filter { it > 4 && it < w * 0.03f }.sorted()
-        return if (d.isEmpty()) w * 0.0085f else d[d.size / 2]
+        var best = 0; var bestV = 0
+        for (d in 5..maxD) { val v = hist[d - 1] + 2 * hist[d] + hist[d + 1]; if (v > bestV) { bestV = v; best = d } }
+        return if (bestV < 30) w * 0.0085f else best.toFloat()
+    }
+
+    /** detect, and if nothing is found try a little bigger / smaller heads (the spacing estimate can be off) */
+    fun find(bm: Bitmap, px: Float, py: Float, sp: Float): Head? {
+        detect(bm, px, py, sp)?.let { return it }
+        for (f in floatArrayOf(1.3f, 0.77f, 1.6f)) detect(bm, px, py, sp * f)?.let { return it }
+        return detect(bm, px, py, bm.width * 0.0085f)
     }
 
     private fun lumOf(c: Int) = (Color.red(c) * 3 + Color.green(c) * 6 + Color.blue(c)) / 10
