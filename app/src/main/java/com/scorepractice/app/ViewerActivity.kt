@@ -615,7 +615,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private fun menuDialog() {
         val dir = if (prefs.getBoolean("swipeRightNext", false)) "지금: 오른쪽으로 밀면 다음 쪽" else "지금: 왼쪽으로 밀면 다음 쪽"
         AlertDialog.Builder(this).setItems(arrayOf("연습 기록", "PDF로 저장", "쪽 이동", "넘김 방향 바꾸기 ($dir)", "이 쪽 필기 모두 지우기",
-            if (half) "반 페이지 넘김 끄기" else "반 페이지 넘김 켜기")) { _, w ->
+            if (half) "반 페이지 넘김 끄기" else "반 페이지 넘김 켜기", "원본 PDF 바꾸기")) { _, w ->
             when (w) {
                 0 -> openRecord()
                 1 -> exportDialog()
@@ -624,12 +624,54 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                         e.text.toString().toIntOrNull()?.let { pager.setCurrentItem(posOf(it - 1), false) }
                     }.show() }
                 5 -> setHalf(!half)
+                6 -> pickNewPdf.launch(arrayOf("application/pdf"))
                 3 -> { prefs.edit().putBoolean("swipeRightNext", !prefs.getBoolean("swipeRightNext", false)).apply(); applyDirection() }
                 4 -> { val p = primaryPage(pager.currentItem)
                     AlertDialog.Builder(this).setMessage("${p + 1}쪽의 필기를 모두 지울까요?").setPositiveButton("지우기") { _, _ ->
                         data.strokes.removeAll { it.page == p }; onInkChanged() }.setNegativeButton("취소", null).show() }
             }
         }.show()
+    }
+
+    // ---- replace the original PDF (a cleaner scan, another edition …); the user chooses what to keep
+    private val pickNewPdf = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) replacePdf(uri) }
+
+    private fun replacePdf(uri: android.net.Uri) {
+        val name = "${score.id}_${System.currentTimeMillis()}.pdf"
+        val nf = File(Store.scoreDir(this), name)
+        val pages = try {
+            contentResolver.openInputStream(uri)!!.use { inp -> nf.outputStream().use { inp.copyTo(it) } }
+            android.os.ParcelFileDescriptor.open(nf, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { PdfRenderer(it).use { r -> r.pageCount } }
+        } catch (e: Exception) { nf.delete(); toast("PDF를 열 수 없습니다"); return }
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 8, 48, 0) }
+        box.addView(TextView(this).apply { text = "지금 ${pdf.pageCount}쪽 → 새 PDF ${pages}쪽\n체크한 것은 그대로 두고, 체크를 끈 것은 지웁니다."; setPadding(0, 0, 0, 12) })
+        fun cb(t: String, n: Int) = CheckBox(this).apply { text = "$t ($n)"; isChecked = true; isEnabled = n > 0 }.also { box.addView(it) }
+        val kInk = cb("필기·형광펜", data.strokes.size)
+        val kFix = cb("색 고친 것 (자동 색칠 포함)", data.fixes.size)
+        val kFin = cb("손번호 (PDF)", data.fingers.size)
+        val kRng = cb("연습 범위 (네모·횟수·기록)", data.ranges.size)
+        box.addView(TextView(this).apply { text = "XML 악보와 XML 손번호, 메트로놈 설정은 그대로입니다."; textSize = 12f; setPadding(0, 12, 0, 0) })
+        AlertDialog.Builder(this).setTitle("원본 PDF 바꾸기").setView(box)
+            .setNegativeButton("취소") { _, _ -> nf.delete() }
+            .setOnCancelListener { nf.delete() }
+            .setPositiveButton("바꾸기") { _, _ ->
+                if (!kInk.isChecked) data.strokes.clear()
+                if (!kFix.isChecked) data.fixes.clear()
+                if (!kFin.isChecked) data.fingers.clear()
+                if (!kRng.isChecked) data.ranges.clear()
+                data.lastPage = data.lastPage.coerceIn(0, pages - 1)
+                Store.saveData(this, score.id, data)
+                val lib = Store.loadLibrary(this); val old = File(Store.scoreDir(this), score.file)
+                val i = lib.indexOfFirst { it.id == score.id }
+                if (i >= 0) lib[i] = lib[i].copy(file = name)
+                Store.saveLibrary(this, lib)
+                lastJson = ""; undoStack.clear(); redoStack.clear()
+                try { synchronized(pdf) { pdf.close() }; fd.close() } catch (_: Exception) {}
+                old.delete()
+                Thread { Backup.sync(applicationContext) }.start()
+                toast("원본 PDF를 바꿨습니다")
+                startActivity(intent); finish()   // open again with the new PDF
+            }.show()
     }
 
     private fun exportDialog() {
@@ -794,14 +836,14 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         cache.get(page)?.let { pv.setOrig(page, it); return }
         val w = resources.displayMetrics.widthPixels.coerceAtLeast(1080) * 3 / 2
         exec.execute {
-            val bmp = synchronized(pdf) {
+            val bmp = try { synchronized(pdf) {
                 pdf.openPage(page).use { p ->
                     val h = (w.toLong() * p.height / p.width).toInt()
                     val b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                     b.eraseColor(Color.WHITE)
                     p.render(b, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY); b
                 }
-            }
+            } } catch (e: Exception) { return@execute }   // PDF closed (being replaced / screen closing)
             val sp = if (splits.containsKey(page)) null else findSplit(bmp)
             main.post {
                 cache.put(page, bmp)

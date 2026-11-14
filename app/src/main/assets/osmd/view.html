@@ -29,6 +29,7 @@
 <script src="opensheetmusicdisplay.min.js"></script>
 <script>
   let osmd = null, boxes = [];
+  let range = [-1, -1];
   const marks = {};
 
   function unit() { return 10 * osmd.zoom; }
@@ -36,7 +37,7 @@
 
   // bounding box of every measure (all staves together), in OSMD units
   // a measure is drawn only inside the section shown (long scores are drawn a section at a time)
-  function drawn(i) { const m = osmd.GraphicSheet.MeasureList[i]; return !!(m && m.some(g => g && g.ParentMusicSystem)); }
+  function drawn(i) { if (range[0] >= 0 && (i < range[0] || i > range[1])) return false; const m = osmd.GraphicSheet.MeasureList[i]; return !!(m && m.some(g => g && g.ParentMusicSystem)); }
   function collect() {
     boxes = [];
     const ml = osmd.GraphicSheet.MeasureList;
@@ -111,7 +112,6 @@
   function setColors(on) { colorize(on); setZoom(osmd.zoom); }
   // redraw at another size (the score re-flows to the screen width); marks and chords follow
   // show measures a..b (indices); -1 = all
-  let range = [-1, -1];
   function applyRange() {
     if (range[0] < 0) osmd.setOptions({ drawFromMeasureNumber: 1, drawUpToMeasureNumber: Number.MAX_SAFE_INTEGER });
     else osmd.setOptions({ drawFromMeasureNumber: range[0] + 1, drawUpToMeasureNumber: range[1] + 1 });
