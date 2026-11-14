@@ -192,7 +192,34 @@ object Store {
 
     fun saveData(c: Context, id: String, d: ScoreData) = writeText(c, id, toJson(d).toString())
 
-    fun writeText(c: Context, id: String, text: String) = writeSafe(dataFile(c, id), text)
+    // Each data file ends with "savedAt": the time its content last changed (used to tell which device has the newer copy).
+    private val SAVED = Regex(",\"savedAt\":(\\d+)\\}\\s*$")
+    private fun stamp(text: String, t: Long) = text.trimEnd().dropLast(1) + ",\"savedAt\":$t}"
+
+    fun writeText(c: Context, id: String, text: String) {
+        val f = dataFile(c, id)
+        val old = if (f.exists()) f.readText() else null
+        if (old != null && old.replace(SAVED, "}") == text) return     // nothing changed: keep the file and its time
+        writeSafe(f, stamp(text, System.currentTimeMillis()))
+    }
+
+    /** when this score's data last changed (0 = never stamped) */
+    fun savedAt(c: Context, id: String): Long {
+        val f = dataFile(c, id); if (!f.exists()) return 0
+        return SAVED.find(f.readText())?.groupValues?.get(1)?.toLongOrNull() ?: 0
+    }
+
+    /** mark as changed now (title / composer / PDF changed) */
+    fun touch(c: Context, id: String) {
+        val f = dataFile(c, id)
+        val text = if (f.exists()) f.readText().replace(SAVED, "}") else toJson(ScoreData()).toString()
+        writeSafe(f, stamp(text, System.currentTimeMillis()))
+    }
+
+    // scores deleted on this phone (id -> time), so syncing deletes them elsewhere too
+    private fun tombFile(c: Context) = File(c.filesDir, "deleted.json")
+    fun tombstones(c: Context): JSONObject = try { JSONObject(tombFile(c).readText()) } catch (e: Exception) { JSONObject() }
+    fun saveTombstones(c: Context, o: JSONObject) = writeSafe(tombFile(c), o.toString())
 
     fun toJson(d: ScoreData): JSONObject {
         val o = JSONObject()
@@ -234,8 +261,9 @@ object Store {
         return o
     }
 
-    fun deleteScore(c: Context, s: Score) {
+    fun deleteScore(c: Context, s: Score, remember: Boolean = true) {
         File(scoreDir(c), s.file).delete(); dataFile(c, s.id).delete(); File(scoreDir(c), "${s.id}.musicxml").delete()
+        if (remember) saveTombstones(c, tombstones(c).put(s.id, System.currentTimeMillis()))
     }
 
     private fun writeSafe(f: File, text: String) {

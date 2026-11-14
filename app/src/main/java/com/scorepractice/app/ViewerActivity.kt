@@ -219,7 +219,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         if (m == PageView.Mode.FIX && !data.showFixes) { data.showFixes = true; redraw() }
         btnRange.text = if (m == PageView.Mode.RANGE) "연습 끝" else "연습"
         if (m == PageView.Mode.RANGE) toast("연습할 부분을 손가락으로 끌어 네모를 그리세요")
-        if (m != PageView.Mode.FINGER && fingerTool != 0) setFingerTool(0)
+        if (m != PageView.Mode.FINGER && fingerTool != 0) chooseFingerTool(0)
         if (m == PageView.Mode.FINGER) { fingerLayerLabel?.invoke(); data.layer(data.activeLayer)?.let { if (!it.visible) { it.visible = true; redraw() } } }
         if (m == PageView.Mode.PEN) { penLayerLabel?.invoke(); data.layer(data.activeLayer)?.let { if (!it.visible) { it.visible = true; redraw() } }; erasing = false; if (!data.showInk) { data.showInk = true; redraw() } }
         if (m == PageView.Mode.VIEW) save()
@@ -454,11 +454,11 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         findViewById<Button>(R.id.fingerSmaller).setOnClickListener { fingerSize(0.88f) }
         val fb = findViewById<LinearLayout>(R.id.fingerBar)
         copyBtn = Button(this).apply { text = "복사"; isAllCaps = false; minWidth = 0; minimumWidth = 0; textSize = 13f
-            setOnClickListener { if (fingerTool == 1) setFingerTool(0) else { setFingerTool(1); toast("복사할 손번호들을 네모로 감싸세요") } } }
+            setOnClickListener { if (fingerTool == 1) chooseFingerTool(0) else { chooseFingerTool(1); toast("복사할 손번호들을 네모로 감싸세요") } } }
         pasteBtn = Button(this).apply { text = "붙여넣기"; isAllCaps = false; minWidth = 0; minimumWidth = 0; textSize = 13f
             setOnClickListener {
                 if (fingerClip.isEmpty()) { toast("먼저 [복사]로 손번호를 고르세요"); return@setOnClickListener }
-                setFingerTool(if (fingerTool == 2) 0 else 2)
+                chooseFingerTool(if (fingerTool == 2) 0 else 2)
                 if (fingerTool == 0) toast("붙여넣기 끝 — 다시 손번호 넣기")
             } }
         fb.addView(copyBtn, fb.childCount - 2); fb.addView(pasteBtn, fb.childCount - 2)
@@ -485,7 +485,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private var copyBtn: Button? = null
     private var pasteBtn: Button? = null
 
-    private fun setFingerTool(t: Int) {
+    private fun chooseFingerTool(t: Int) {
         fingerTool = t
         copyBtn?.setTextColor(if (t == 1) Color.rgb(200, 30, 30) else Color.BLACK)
         pasteBtn?.setTextColor(if (t == 2) Color.rgb(200, 30, 30) else Color.BLACK)
@@ -497,7 +497,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         if (got.isEmpty()) { toast("네모 안에 손번호가 없습니다"); return }
         val a = got.minWith(compareBy({ it.x }, { it.y }))
         fingerClip = got.map { it.copy(x = it.x - a.x, y = it.y - a.y) }
-        setFingerTool(2)
+        chooseFingerTool(2)
         toast("손번호 ${got.size}개 복사 — 같은 음형의 첫 음표 위로 끌어 놓으세요 (손가락 위에 미리 보기가 따라옵니다)")
     }
 
@@ -523,7 +523,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             contentResolver.openInputStream(uri)!!.use { inp -> xmlFile().outputStream().use { inp.copyTo(it) } }
             xscore = MusicXml.load(xmlFile())
             toast("악보 파일 연결: ${xscore!!.measures.size}마디, 음표 ${xscore!!.notes.size}개")
-            Thread { Backup.sync(applicationContext) }.start()
+            Store.touch(this, score.id)   // counts as a change of this score (for syncing)
         } catch (e: Exception) { xmlFile().delete(); xscore = null; toast("이 파일을 읽지 못했습니다: ${e.message}") }
         buildPlayBar()
     }
@@ -819,7 +819,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                 try { synchronized(pdf) { pdf.close() }; fd.close() } catch (_: Exception) {}
                 old.delete()
                 try { writer.submit {}.get(3, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) {}
-                Thread { Backup.sync(applicationContext) }.start()
+                Store.touch(this, score.id)
                 toast("원본 PDF를 바꿨습니다")
                 startActivity(intent); finish()   // open again with the new PDF
             }.show()
@@ -1053,7 +1053,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         }
     }
 
-    override fun onPause() { super.onPause(); stopPlay(); save(); try { writer.submit {}.get(3, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) {}; Thread { Backup.sync(applicationContext) }.start(); if (metro.isRunning) { metro.stop(); mPlay.text = "▶ 시작" } }
+    override fun onPause() { super.onPause(); stopPlay(); save(); try { writer.submit {}.get(3, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) {};  if (metro.isRunning) { metro.stop(); mPlay.text = "▶ 시작" } }
 
     override fun onDestroy() {
         super.onDestroy()

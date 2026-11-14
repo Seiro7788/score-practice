@@ -7,6 +7,7 @@ import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import org.json.JSONArray
 import java.io.File
+import org.json.JSONObject
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.zip.ZipEntry
@@ -164,37 +165,144 @@ object Backup {
 
     private val syncLock = Any()
 
-    /** copy the library to the chosen folder (PDFs only when missing, data every time) */
-    fun sync(c: Context): Boolean = synchronized(syncLock) {
-        val tree = folder(c) ?: return false
+    // ================= sync between devices through one shared folder (e.g. a Google Drive folder) =================
+    // Folder: library.json = {"scores":[{id,title,composer,file,added,origName,savedAt}], "deleted":{id:time}}
+    //         scores/<id>.json, <pdf>, <id>.musicxml
+    // Receiving happens on its own when the app opens; sending only when the user presses 올리기.
+
+    private class Remote(val scores: LinkedHashMap<String, JSONObject>, val deleted: JSONObject)
+
+    private fun readRemote(c: Context, tree: Uri, kids: List<Child>): Remote {
+        val lib = kids.firstOrNull { !it.dir && it.name == "library.json" }
+        val text = lib?.let { c.contentResolver.openInputStream(DocumentsContract.buildDocumentUriUsingTree(tree, it.id))?.use { s -> s.readBytes().toString(Charsets.UTF_8) } }
+        val map = LinkedHashMap<String, JSONObject>(); var del = JSONObject()
+        if (text != null) try {
+            val t = text.trim()
+            val arr = if (t.startsWith("[")) JSONArray(t) else JSONObject(t).let { o -> del = o.optJSONObject("deleted") ?: JSONObject(); o.optJSONArray("scores") ?: JSONArray() }
+            for (i in 0 until arr.length()) arr.getJSONObject(i).let { map[it.getString("id")] = it }
+        } catch (_: Exception) {}
+        return Remote(map, del)
+    }
+
+    private fun scoreOf(o: JSONObject) = Score(o.getString("id"), o.optString("title"), o.optString("composer"), o.getString("file"), o.optLong("added"), o.optString("origName"))
+    private fun entryOf(s: Score, savedAt: Long) = JSONObject().put("id", s.id).put("title", s.title).put("composer", s.composer)
+        .put("file", s.file).put("added", s.added).put("origName", s.origName).put("savedAt", savedAt)
+
+    private fun synced(c: Context): JSONObject = try { JSONObject(c.getSharedPreferences(PREF, Context.MODE_PRIVATE).getString("synced", "{}")!!) } catch (e: Exception) { JSONObject() }
+    private fun saveSynced(c: Context, o: JSONObject) = c.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putString("synced", o.toString()).apply()
+
+    /** files in every "scores" folder of the shared folder: name -> child */
+    private fun remoteFiles(c: Context, tree: Uri, kids: List<Child>): HashMap<String, Child> {
+        val files = HashMap<String, Child>()
+        for (d in kids.filter { it.dir && SCORES.matches(it.name) }) for (ch in children(c, tree, d.id)) if (!ch.dir && ch.size != 0L) files.putIfAbsent(ch.name, ch)
+        return files
+    }
+
+    private fun download(c: Context, tree: Uri, ch: Child, to: File) {
+        val tmp = File(to.parentFile, to.name + ".part")
+        c.contentResolver.openInputStream(DocumentsContract.buildDocumentUriUsingTree(tree, ch.id))?.use { i -> tmp.outputStream().use { i.copyTo(it) } }
+        if (!tmp.renameTo(to)) { to.delete(); tmp.renameTo(to) }
+    }
+
+    /** scores changed on this phone and not sent yet (and deletions not sent yet) */
+    fun pending(c: Context): Int {
+        val sy = synced(c)
+        val n = Store.loadLibrary(c).count { s -> val t = Store.savedAt(c, s.id); t == 0L || t > sy.optLong(s.id, -1) }
+        val tomb = Store.tombstones(c); var d = 0
+        for (k in tomb.keys()) if (!sy.optBoolean("del_$k")) d++
+        return n + d
+    }
+
+    /** take scores that are newer in the shared folder; returns how many came in (or -1 = no folder / not readable) */
+    fun receive(c: Context): Int = synchronized(syncLock) {
+        val tree = folder(c) ?: return -1
         try {
             val rootId = DocumentsContract.getTreeDocumentId(tree)
             val kids = children(c, tree, rootId)
-            val sdId = scoresDir(c, tree, rootId, kids) ?: return false
-            val have = children(c, tree, sdId).associateBy { it.name }
-            val keep = mutableSetOf<String>()
-            // only files changed since they were last copied (each copy to a cloud folder is an upload)
-            val p = c.getSharedPreferences(PREF, Context.MODE_PRIVATE); val sk = "synced_$tree"
-            val done = try { org.json.JSONObject(p.getString(sk, "{}")!!) } catch (e: Exception) { org.json.JSONObject() }
-            fun stamp(f: File) = "${f.length()}:${f.lastModified()}"
-            for ((name, f) in localFiles(c)) {
-                val short = name.removePrefix("scores/")
-                if (name != "library.json") keep.add(short)
-                val there = if (name == "library.json") kids.firstOrNull { !it.dir && it.name == name } else have[short]
-                if (there != null && there.size != 0L && done.optString(name) == stamp(f)) continue
-                if (name == "library.json") write(c, tree, rootId, kids.filter { !it.dir }.associateBy { it.name }, "library.json", "application/json", f)
-                else {
-                    val isPdf = short.endsWith(".pdf")
-                    if (!(isPdf && have[short]?.size == f.length()))
-                        write(c, tree, sdId, have, short, if (isPdf) "application/pdf" else if (short.endsWith(".json")) "application/json" else "application/octet-stream", f)
-                }
-                done.put(name, stamp(f))
+            val remote = readRemote(c, tree, kids)
+            if (remote.scores.isEmpty() && remote.deleted.length() == 0) return 0
+            val files = remoteFiles(c, tree, kids)
+            val local = Store.loadLibrary(c); val tomb = Store.tombstones(c); val sy = synced(c)
+            var got = 0
+            // deleted on another device after this phone last changed them
+            for (id in remote.deleted.keys()) {
+                val l = local.firstOrNull { it.id == id } ?: continue
+                if (Store.savedAt(c, id) <= remote.deleted.optLong(id)) { Store.deleteScore(c, l, remember = false); local.remove(l); got++ }
             }
-            p.edit().putString(sk, done.toString()).apply()
-            for ((n, ch) in have) if (n !in keep && !ch.dir)   // scores deleted on the phone
-                try { DocumentsContract.deleteDocument(c.contentResolver, DocumentsContract.buildDocumentUriUsingTree(tree, ch.id)) } catch (_: Exception) {}
-            true
-        } catch (e: Exception) { false }
+            for ((id, e) in remote.scores) {
+                val rs = e.optLong("savedAt", 0)
+                if (tomb.has(id) && tomb.optLong(id) >= rs) continue                // deleted here later
+                val l = local.firstOrNull { it.id == id } ?: sameOnPhone(local, scoreOf(e))
+                if (l != null && rs <= Store.savedAt(c, l.id)) continue             // this phone has the same or newer
+                val js = files["$id.json"] ?: continue
+                val sc = scoreOf(e)
+                val pdfLocal = File(Store.scoreDir(c), sc.file)
+                val pdfRemote = files[sc.file]
+                if (!(pdfLocal.exists() && (pdfRemote == null || pdfLocal.length() == pdfRemote.size))) {
+                    if (pdfRemote == null) continue                                  // PDF not uploaded (yet)
+                    download(c, tree, pdfRemote, pdfLocal)
+                }
+                download(c, tree, js, File(Store.scoreDir(c), "$id.json"))
+                files["$id.musicxml"]?.let { download(c, tree, it, File(Store.scoreDir(c), "$id.musicxml")) }
+                if (l != null) {
+                    if (l.id != id) { Store.deleteScore(c, l, remember = true); local.remove(l) }
+                    else if (l.file != sc.file) File(Store.scoreDir(c), l.file).delete()
+                }
+                local.removeAll { it.id == id }; local.add(sc)
+                sy.put(id, Store.savedAt(c, id)); got++
+            }
+            Store.saveLibrary(c, local); saveSynced(c, sy)
+            got
+        } catch (e: Exception) { -1 }
+    }
+
+    /** send this phone's changed scores (and deletions) to the shared folder. Returns a message for the user. */
+    fun send(c: Context): String = synchronized(syncLock) {
+        val tree = folder(c) ?: return "동기화 폴더를 먼저 정하세요 (⋮ → 동기화 폴더 지정)"
+        try {
+            val rootId = DocumentsContract.getTreeDocumentId(tree)
+            val kids = children(c, tree, rootId)
+            val remote = readRemote(c, tree, kids)
+            val sdId = scoresDir(c, tree, rootId, kids) ?: return "폴더에 쓸 수 없습니다"
+            val have = children(c, tree, sdId).associateBy { it.name }.toMutableMap()
+            val sy = synced(c); val local = Store.loadLibrary(c); val tomb = Store.tombstones(c)
+            var sent = 0; var newer = 0
+            fun up(name: String, f: File, mime: String) { write(c, tree, sdId, have, name, mime, f) }
+            fun removeRemote(id: String) {
+                val e = remote.scores.remove(id) ?: return
+                for (n in listOf("$id.json", "$id.musicxml", e.optString("file"))) have[n]?.let {
+                    try { DocumentsContract.deleteDocument(c.contentResolver, DocumentsContract.buildDocumentUriUsingTree(tree, it.id)) } catch (_: Exception) {}
+                    have.remove(n) }
+            }
+            for (s in local) {
+                var ls = Store.savedAt(c, s.id); if (ls == 0L) { Store.touch(c, s.id); ls = Store.savedAt(c, s.id) }
+                val re = remote.scores[s.id]; val rs = re?.optLong("savedAt", 0) ?: -1
+                if (re != null && rs > ls) { newer++; continue }                      // the folder has a newer copy: receive first
+                if (re != null && rs == ls && have.containsKey(s.file)) { sy.put(s.id, ls); continue }
+                // the same piece under another id in the folder (imported separately on two devices)
+                remote.scores.values.firstOrNull { it.optString("id") != s.id && sameOnPhone(listOf(s), scoreOf(it)) != null }?.let { o ->
+                    if (o.optLong("savedAt", 0) <= ls) { val oid = o.getString("id"); removeRemote(oid); remote.deleted.put(oid, System.currentTimeMillis()) }
+                }
+                val pdf = File(Store.scoreDir(c), s.file)
+                if (pdf.exists() && have[s.file]?.size != pdf.length()) up(s.file, pdf, "application/pdf")
+                File(Store.scoreDir(c), "${s.id}.json").takeIf { it.exists() }?.let { up("${s.id}.json", it, "application/json") }
+                File(Store.scoreDir(c), "${s.id}.musicxml").takeIf { it.exists() }?.let { up("${s.id}.musicxml", it, "application/octet-stream") }
+                remote.scores[s.id] = entryOf(s, ls); sy.put(s.id, ls); sent++
+            }
+            // deletions made on this phone
+            for (id in tomb.keys().asSequence().toList()) {
+                val t = tomb.optLong(id)
+                val re = remote.scores[id]
+                if (re == null || re.optLong("savedAt", 0) <= t) { removeRemote(id); remote.deleted.put(id, t) }
+                sy.put("del_$id", true)
+            }
+            val out = JSONObject().put("scores", JSONArray().apply { remote.scores.values.forEach { put(it) } }).put("deleted", remote.deleted)
+            val tmp = File(c.cacheDir, "library_sync.json").apply { writeText(out.toString()) }
+            write(c, tree, rootId, kids.filter { !it.dir }.associateBy { it.name }, "library.json", "application/json", tmp)
+            saveSynced(c, sy)
+            "올렸습니다: ${sent}곡" + (if (newer > 0) " · 다른 기기에서 더 최근에 고친 ${newer}곡은 그대로 두었습니다(받기로 가져오세요)" else "") +
+                if (isCloud(tree)) "\n구글드라이브 앱이 인터넷에 연결되면 올라갑니다" else ""
+        } catch (e: Exception) { "올리지 못했습니다: ${e.message}" }
     }
 
     /** cloud folders (Google Drive …) are slow and unreliable as a live mirror */

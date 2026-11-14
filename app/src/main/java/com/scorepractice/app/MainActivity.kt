@@ -12,6 +12,7 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -97,7 +98,7 @@ class MainActivity : AppCompatActivity() {
                 val ids = list.filterIndexed { i, _ -> checked[i] }.map { it.id }.toSet()
                 if (ids.isEmpty()) return@setPositiveButton
                 background("백업 불러오는 중…") {
-                    val n = Backup.loadOpened(this, ids); Backup.sync(this)
+                    val n = Backup.loadOpened(this, ids)
                     "악보 ${n}개를 불러왔습니다 (휴대폰에 있던 다른 악보는 그대로입니다)"
                 }
             }.show()
@@ -111,29 +112,27 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun chooseFolder(uri: Uri) {
-        if (Backup.isCloud(uri)) {
-            AlertDialog.Builder(this).setTitle("구글드라이브 폴더")
-                .setMessage("저장 폴더는 악보를 바꿀 때마다 자동으로 복사하는 곳이라, 구글드라이브 같은 클라우드 폴더에서는 느리고 업로드가 빠지기도 합니다.\n\n휴대폰 안의 폴더(예: Documents)를 저장 폴더로 쓰고, 구글드라이브에는 '백업 파일 만들기'로 올리는 것을 권합니다.")
-                .setPositiveButton("그래도 이 폴더 쓰기") { _, _ -> useFolder(uri) }
-                .setNegativeButton("다른 폴더 고르기") { _, _ -> pickFolder.launch(null) }.show()
-            return
-        }
-        useFolder(uri)
-    }
+    private fun chooseFolder(uri: Uri) = useFolder(uri)
 
     private fun useFolder(uri: Uri) {
         try { Backup.setFolder(this, uri) } catch (e: Exception) { Toast.makeText(this, "이 폴더는 쓸 수 없습니다", Toast.LENGTH_LONG).show(); return }
-        if (Backup.folderHasLibrary(this, uri))
-            AlertDialog.Builder(this).setTitle("저장 폴더").setMessage("이 폴더에 전에 저장한 악보가 있습니다. 불러올까요?")
-                .setPositiveButton("불러오기") { _, _ -> background("불러오는 중…") { val n = Backup.importFromFolder(this, uri); Backup.sync(this); "악보 ${n}개를 불러왔습니다" } }
-                .setNegativeButton("아니요") { _, _ -> background("저장하는 중…") { if (Backup.sync(this)) "이 폴더에 저장했습니다" else "저장 실패" } }
-                .show()
-        else background("저장하는 중…") { if (Backup.sync(this)) "이제 이 폴더에 자동으로 저장됩니다" else "저장 실패" }
+        // take what is already there, then offer to send this phone's scores
+        background("동기화 폴더를 읽는 중…") {
+            val n = Backup.receive(this)
+            runOnUiThread {
+                updateSyncBar()
+                AlertDialog.Builder(this).setTitle("동기화 폴더")
+                    .setMessage((if (n > 0) "폴더에서 ${n}곡을 받았습니다.\n\n" else "") +
+                        "다른 기기에서도 같은 폴더를 동기화 폴더로 정하세요.\n\n· 받기: 앱을 열 때 자동으로 (목록 위 [받기]로도)\n· 올리기: 목록 위 [올리기]를 누를 때만\n\n지금 이 폰의 악보를 올릴까요?")
+                    .setPositiveButton("올리기") { _, _ -> background("올리는 중…") { Backup.send(this).also { runOnUiThread { updateSyncBar() } } } }
+                    .setNegativeButton("나중에", null).show()
+            }
+            "동기화 폴더를 정했습니다"
+        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menu.add(0, 1, 0, "저장 폴더 지정 (앱을 지워도 남음)")
+        menu.add(0, 1, 0, "동기화 폴더 지정 (기기끼리 맞추기)")
         menu.add(0, 2, 1, "백업 파일 만들기 (구글드라이브 등)")
         menu.add(0, 3, 2, "백업 불러오기")
         menu.add(0, 4, 3, "앱 정보")
@@ -161,6 +160,11 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         title = getString(R.string.app_name)
         list = findViewById(R.id.list); empty = findViewById(R.id.empty); search = findViewById(R.id.search)
+        findViewById<Button>(R.id.syncReceive).setOnClickListener {
+            background("받는 중…") { val n = Backup.receive(this); runOnUiThread { updateSyncBar() }
+                if (n < 0) "동기화 폴더를 읽지 못했습니다" else if (n == 0) "새로 받을 것이 없습니다" else "${n}곡을 받았습니다" } }
+        findViewById<Button>(R.id.syncSend).setOnClickListener {
+            background("올리는 중…") { Backup.send(this).also { runOnUiThread { updateSyncBar() } } } }
         list.layoutManager = LinearLayoutManager(this)
         list.adapter = Adapter()
         findViewById<FloatingActionButton>(R.id.add).setOnClickListener { pick.launch(arrayOf("application/pdf")) }
@@ -172,15 +176,39 @@ class MainActivity : AppCompatActivity() {
         // fresh install with nothing yet: offer to load from a folder or a backup
         if (Store.loadLibrary(this).isEmpty() && Backup.folder(this) == null)
             AlertDialog.Builder(this).setTitle("처음 시작")
-                .setMessage("전에 쓰던 악보가 있으면 불러올 수 있습니다.\n\n· 저장 폴더: 앱을 지우기 전에 지정해 둔 휴대폰 폴더\n· 백업 파일: 구글드라이브 등에 올려 둔 백업\n\n나중에 오른쪽 위 메뉴(⋮)에서도 할 수 있습니다.")
-                .setPositiveButton("저장 폴더 고르기") { _, _ -> pickFolder.launch(null) }
+                .setMessage("전에 쓰던 악보가 있으면 불러올 수 있습니다.\n\n· 동기화 폴더: 다른 기기나 전에 쓰던 앱과 맞춰 둔 폴더(구글드라이브 등)\n· 백업 파일: 구글드라이브 등에 올려 둔 백업\n\n나중에 오른쪽 위 메뉴(⋮)에서도 할 수 있습니다.")
+                .setPositiveButton("동기화 폴더 고르기") { _, _ -> pickFolder.launch(null) }
                 .setNeutralButton("백업 파일") { _, _ -> loadBackup.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed")) }
                 .setNegativeButton("새로 시작", null).show()
     }
 
     override fun onResume() {
-        super.onResume(); all = Store.loadLibrary(this); refresh()
-        Thread { Backup.sync(this) }.start()   // pick up changes made in the score screen
+        super.onResume(); all = Store.loadLibrary(this); refresh(); updateSyncBar()
+        autoReceive()
+    }
+
+    // ---------------- sync between devices: receiving is automatic, sending (올리기) is by hand
+    private var lastReceive = 0L
+    private fun autoReceive() {
+        if (Backup.folder(this) == null || System.currentTimeMillis() - lastReceive < 60_000) return
+        lastReceive = System.currentTimeMillis()
+        Thread {
+            val n = Backup.receive(this)
+            runOnUiThread {
+                if (n > 0) { all = Store.loadLibrary(this); refresh(); Toast.makeText(this, "다른 기기에서 고친 악보 ${n}곡을 받았습니다", Toast.LENGTH_LONG).show() }
+                updateSyncBar()
+            }
+        }.start()
+    }
+
+    private fun updateSyncBar() {
+        val bar = findViewById<View>(R.id.syncBar) ?: return
+        if (Backup.folder(this) == null) { bar.visibility = View.GONE; return }
+        bar.visibility = View.VISIBLE
+        Thread {
+            val n = Backup.pending(this)
+            runOnUiThread { findViewById<TextView>(R.id.syncInfo).text = if (n > 0) "동기화: 아직 안 올린 변경 ${n}곡" else "동기화: 모두 올렸습니다" }
+        }.start()
     }
 
     private fun refresh() {
@@ -231,9 +259,9 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("저장") { _, _ ->
                 s.composer = comp.text.toString().trim(); s.title = tit.text.toString().trim()   // empty = show the file name
                 if (isNew) all.add(s)
-                Store.saveLibrary(this, all); refresh(); Thread { Backup.sync(this) }.start()
+                Store.saveLibrary(this, all); if (!isNew) Store.touch(this, s.id); refresh(); updateSyncBar()
             }
-            .setNegativeButton("취소") { _, _ -> if (isNew) Store.deleteScore(this, s) }
+            .setNegativeButton("취소") { _, _ -> if (isNew) Store.deleteScore(this, s, remember = false) }
             .setCancelable(false).show()
     }
 
@@ -242,7 +270,7 @@ class MainActivity : AppCompatActivity() {
             .setItems(arrayOf("제목·작곡가 수정", "삭제")) { _, w ->
                 if (w == 0) editInfo(s, false)
                 else AlertDialog.Builder(this).setMessage("'${s.shownTitle}'을(를) 삭제할까요? 연습 기록과 필기도 지워집니다.")
-                    .setPositiveButton("삭제") { _, _ -> all.remove(s); Store.deleteScore(this, s); Store.saveLibrary(this, all); refresh(); Thread { Backup.sync(this) }.start() }
+                    .setPositiveButton("삭제") { _, _ -> all.remove(s); Store.deleteScore(this, s); Store.saveLibrary(this, all); refresh(); updateSyncBar() }
                     .setNegativeButton("취소", null).show()
             }.show()
     }
