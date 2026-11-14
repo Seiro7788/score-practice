@@ -258,7 +258,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             prefs.edit().putInt("tempo_last", metro.bpm).putInt("meter_last", metro.beats).apply()
             if (data.bpm != metro.bpm || data.beats != metro.beats) {
                 data.bpm = metro.bpm; data.beats = metro.beats
-                Store.saveData(this, score.id, data)   // kept with the score (and in backups); not an undo step
+                persist()   // kept with the score (and in backups); not an undo step
             }
         }
         val add = { d: Int -> metro.bpm = (metro.bpm + d).coerceIn(20, 300); show() }
@@ -332,10 +332,10 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         // tapping a note that was already fixed removes that fix
         val hit = data.fixes.filter { it.page == page && kotlin.math.abs(it.x - x) < it.r * 1.1f && kotlin.math.abs((it.y - y) * h / w) < it.rb * 1.4f }
             .minByOrNull { kotlin.math.abs(it.x - x) + kotlin.math.abs(it.y - y) }
-        if (hit != null) { data.fixes.remove(hit); save(); refreshFixes(); return }
+        if (hit != null) { data.fixes.remove(hit); save(); pages.values.forEach { it.refreshFixes(page) }; return }
         if (head == null) { toast("음표를 찾지 못했습니다. 음표 한가운데를 눌러 주세요"); return }
         val f = Fix(page, head.x / w, head.y / h, head.a / w, fixColor, head.hollow, head.b / w)
-        data.fixes.add(f); save(); refreshFixes()
+        data.fixes.add(f); save(); pages.values.forEach { it.fixAdded(f) }
     }
 
     // ---- fingering numbers
@@ -407,11 +407,11 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         }))
         row1.addView(small(Button(this).apply {
             text = hands[data.playHands]
-            setOnClickListener { data.playHands = (data.playHands + 1) % 3; text = hands[data.playHands]; Store.saveData(this@ViewerActivity, score.id, data) }
+            setOnClickListener { data.playHands = (data.playHands + 1) % 3; text = hands[data.playHands]; persist() }
         }))
         row1.addView(small(Button(this).apply {
             text = sounds[data.playSound]
-            setOnClickListener { data.playSound = (data.playSound + 1) % 3; text = sounds[data.playSound]; Store.saveData(this@ViewerActivity, score.id, data) }
+            setOnClickListener { data.playSound = (data.playSound + 1) % 3; text = sounds[data.playSound]; persist() }
         }))
         row1.addView(TextView(this).apply { text = "  ♩=${xmlTempo(this@ViewerActivity, data, sc)}"; textSize = 13f })
         val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
@@ -660,7 +660,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                 if (!kFin.isChecked) data.fingers.clear()
                 if (!kRng.isChecked) data.ranges.clear()
                 data.lastPage = data.lastPage.coerceIn(0, pages - 1)
-                Store.saveData(this, score.id, data)
+                persist()
                 val lib = Store.loadLibrary(this); val old = File(Store.scoreDir(this), score.file)
                 val i = lib.indexOfFirst { it.id == score.id }
                 if (i >= 0) lib[i] = lib[i].copy(file = name)
@@ -668,6 +668,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                 lastJson = ""; undoStack.clear(); redoStack.clear()
                 try { synchronized(pdf) { pdf.close() }; fd.close() } catch (_: Exception) {}
                 old.delete()
+                try { writer.submit {}.get(3, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) {}
                 Thread { Backup.sync(applicationContext) }.start()
                 toast("원본 PDF를 바꿨습니다")
                 startActivity(intent); finish()   // open again with the new PDF
@@ -731,30 +732,42 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     /** snapshot without view-only state (page, visibility toggles don't count as edits) */
     private fun snapshot(): String = Store.toJson(data).apply { remove("lastPage"); remove("bpm"); remove("beats"); remove("xmlBpm"); remove("xfingers") }.toString()
 
+    private val writer = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private var undoChars = 0L
+
+    private fun persist() { val full = Store.toJson(data).toString(); val id = score.id; val ctx = applicationContext; writer.execute { Store.writeText(ctx, id, full) } }
+
+    /** remember the change for undo and write it to disk (the writing happens in the background) */
     private fun save() {
-        val now = snapshot()
+        val o = Store.toJson(data)
+        val full = o.toString()
+        o.remove("lastPage"); o.remove("bpm"); o.remove("beats"); o.remove("xmlBpm"); o.remove("xfingers")
+        val now = o.toString()
         if (lastJson.isNotEmpty() && now != lastJson) {
-            undoStack.addLast(lastJson); if (undoStack.size > 100) undoStack.removeFirst(); redoStack.clear()
+            undoStack.addLast(lastJson); undoChars += lastJson.length; redoStack.clear()
+            // keep at most 100 steps and about 16 MB of snapshots (big scores with lots of ink)
+            while (undoStack.size > 100 || (undoChars > 8_000_000 && undoStack.size > 5)) undoChars -= undoStack.removeFirst().length
         }
         lastJson = now
-        Store.saveData(this, score.id, data)
+        val id = score.id; val ctx = applicationContext
+        writer.execute { Store.writeText(ctx, id, full) }
     }
 
     private fun restore(json: String) {
         val page = data.lastPage; val bpm = data.bpm; val beats = data.beats; val xb = data.xmlBpm; val xf = data.xfingers.toList()
         data = Store.parse(json); data.xfingers.clear(); data.xfingers.addAll(xf); data.lastPage = page; data.bpm = bpm; data.beats = beats; data.xmlBpm = xb; lastJson = json
-        Store.saveData(this, score.id, data)
+        persist()
         refreshFixes(); updatePracticeBar(); redraw()
     }
 
     private fun undo() {
         val prev = undoStack.removeLastOrNull() ?: run { toast("되돌릴 것이 없습니다"); return }
-        redoStack.addLast(lastJson); restore(prev)
+        undoChars -= prev.length; redoStack.addLast(lastJson); restore(prev)
     }
 
     private fun redo() {
         val next = redoStack.removeLastOrNull() ?: run { toast("다시 할 것이 없습니다"); return }
-        undoStack.addLast(lastJson); restore(next)
+        undoStack.addLast(lastJson); undoChars += lastJson.length; restore(next)
     }
 
     override fun onUndoGesture() = undo()
@@ -890,11 +903,11 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         }
     }
 
-    override fun onPause() { super.onPause(); stopPlay(); save(); Thread { Backup.sync(applicationContext) }.start(); if (metro.isRunning) { metro.stop(); mPlay.text = "▶ 시작" } }
+    override fun onPause() { super.onPause(); stopPlay(); save(); try { writer.submit {}.get(3, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) {}; Thread { Backup.sync(applicationContext) }.start(); if (metro.isRunning) { metro.stop(); mPlay.text = "▶ 시작" } }
 
     override fun onDestroy() {
         super.onDestroy()
-        exec.shutdown()
+        exec.shutdown(); writer.shutdown()
         try { synchronized(pdf) { pdf.close() }; fd.close() } catch (_: Exception) {}
     }
 }

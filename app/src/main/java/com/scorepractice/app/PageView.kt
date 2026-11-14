@@ -74,14 +74,33 @@ class PageView(context: Context, private val host: Host) : View(context) {
     private val bakedKey = mutableMapOf<Int, Int>()
 
     fun refreshFixes() { bakedKey.clear(); shown.clear(); invalidate() }
+    /** only this page's colours changed */
+    fun refreshFixes(p: Int) { if (bakedKey.remove(p) != null || shown.remove(p) != null) invalidate() }
+
+    /** one colour fix added: paint just that note on the page already prepared instead of rebuilding the page */
+    fun fixAdded(f: Fix) {
+        val p = f.page; val have = shown[p] ?: return
+        val o = origs[p]
+        val hasHi = host.data.strokes.any { it.page == p && Highlight.isHighlighter(it) && host.data.strokeVisible(it) }
+        if (have === o || hasHi || !host.data.showFixes || !have.isMutable) { refreshFixes(p); return }
+        HeadFix.apply(have, f.x * have.width, f.y * have.height, f.r * have.width, f.rb * have.width, f.hollow, f.color)
+        bakedKey[p] = keyOf(p); invalidate()
+    }
+
+    private fun keyOf(p: Int): Int {
+        val fx = if (host.data.showFixes) host.data.fixes.filter { it.page == p } else emptyList()
+        val hi = host.data.strokes.filter { it.page == p && Highlight.isHighlighter(it) && host.data.strokeVisible(it) }
+        var key = fx.hashCode()
+        for (s in hi) key = key * 31 + System.identityHashCode(s)
+        return key
+    }
 
     /** page bitmap with colour fixes and highlighter baked in; rebuilt only when those change */
     private fun baked(p: Int): Bitmap? {
         val o = origs[p] ?: return null
         val fx = if (host.data.showFixes) host.data.fixes.filter { it.page == p } else emptyList()
         val hi = host.data.strokes.filter { it.page == p && Highlight.isHighlighter(it) && host.data.strokeVisible(it) }
-        var key = fx.hashCode()
-        for (s in hi) key = key * 31 + System.identityHashCode(s)
+        val key = keyOf(p)
         val have = shown[p]
         if (have != null && bakedKey[p] == key) return have
         val bm = if (fx.isEmpty() && hi.isEmpty()) o else o.copy(Bitmap.Config.ARGB_8888, true).also { bm ->
