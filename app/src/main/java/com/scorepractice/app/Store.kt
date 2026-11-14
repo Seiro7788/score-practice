@@ -105,12 +105,14 @@ object Store {
         return out
     }
 
-    fun saveLibrary(c: Context, list: List<Score>) {
+    fun libraryJson(list: List<Score>): String {
         val a = JSONArray()
         for (s in list) a.put(JSONObject().put("id", s.id).put("title", s.title)
             .put("composer", s.composer).put("file", s.file).put("added", s.added).put("origName", s.origName))
-        writeSafe(libFile(c), a.toString())
+        return a.toString()
     }
+
+    fun saveLibrary(c: Context, list: List<Score>) = writeSafe(libFile(c), libraryJson(list))
 
     fun loadData(c: Context, id: String): ScoreData {
         val f = dataFile(c, id)

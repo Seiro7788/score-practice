@@ -36,12 +36,51 @@ object Backup {
     }
 
     // ---------- zip backup
-    fun writeZip(c: Context, out: OutputStream) {
+    /** ids = the scores to put in the backup (null = all) */
+    fun writeZip(c: Context, out: OutputStream, ids: Set<String>? = null) {
+        val lib = Store.loadLibrary(c).filter { ids == null || it.id in ids }
+        val keep = lib.flatMap { listOf(it.file, "${it.id}.json", "${it.id}.musicxml") }.toSet()
         ZipOutputStream(out.buffered()).use { z ->
+            z.putNextEntry(ZipEntry("library.json"))
+            z.write(Store.libraryJson(lib).toByteArray(Charsets.UTF_8)); z.closeEntry()
             for ((name, f) in localFiles(c)) {
+                if (name == "library.json" || name.removePrefix("scores/") !in keep) continue
                 z.putNextEntry(ZipEntry(name)); f.inputStream().use { it.copyTo(z) }; z.closeEntry()
             }
         }
+    }
+
+    /** unpack a backup to a temporary folder and list its scores (for choosing what to load) */
+    fun openZip(c: Context, inp: InputStream): List<Score> {
+        val tmp = File(c.cacheDir, "restore").apply { deleteRecursively(); mkdirs() }
+        ZipInputStream(inp.buffered()).use { z ->
+            while (true) {
+                val e = z.nextEntry ?: break
+                val name = e.name
+                if (e.isDirectory || name.contains("..") || !(name == "library.json" || name.startsWith("scores/"))) continue
+                val f = File(tmp, name); f.parentFile?.mkdirs(); f.outputStream().use { z.copyTo(it) }
+            }
+        }
+        val lib = File(tmp, "library.json").takeIf { it.exists() }?.readText() ?: return emptyList()
+        return parseLib(lib)
+    }
+
+    /** load the chosen scores from the unpacked backup (scores already on the phone stay; the same score is replaced) */
+    fun loadOpened(c: Context, ids: Set<String>): Int {
+        val tmp = File(c.cacheDir, "restore")
+        val lib = File(tmp, "library.json").takeIf { it.exists() }?.readText()
+        return mergeFrom(c, lib, ids) { name -> File(tmp, "scores/$name").takeIf { it.exists() }?.inputStream() }.also { tmp.deleteRecursively() }
+    }
+
+    /** the same piece already on the phone: same id, or same composer and title */
+    fun sameOnPhone(mine: List<Score>, s: Score): Score? =
+        mine.firstOrNull { it.id == s.id } ?: mine.firstOrNull { norm(it.composer) == norm(s.composer) && norm(it.shownTitle) == norm(s.shownTitle) }
+    private fun norm(t: String) = t.lowercase().replace(Regex("[\\s_\\-·.,()]"), "")
+
+    private fun parseLib(text: String): List<Score> {
+        val a = JSONArray(text)
+        return (0 until a.length()).map { i -> val o = a.getJSONObject(i)
+            Score(o.getString("id"), o.optString("title"), o.optString("composer"), o.getString("file"), o.optLong("added"), o.optString("origName")) }
     }
 
     /** merge a backup into this phone: scores from the backup are added, same scores are replaced by the backup copy */
@@ -55,17 +94,18 @@ object Backup {
                 val f = File(tmp, name); f.parentFile?.mkdirs(); f.outputStream().use { z.copyTo(it) }
             }
         }
-        return mergeFrom(c, File(tmp, "library.json").takeIf { it.exists() }?.readText()) { name -> File(tmp, "scores/$name").takeIf { it.exists() }?.inputStream() }
+        return mergeFrom(c, File(tmp, "library.json").takeIf { it.exists() }?.readText(), null) { name -> File(tmp, "scores/$name").takeIf { it.exists() }?.inputStream() }
             .also { tmp.deleteRecursively() }
     }
 
-    private fun mergeFrom(c: Context, libText: String?, open: (String) -> InputStream?): Int {
+    private fun mergeFrom(c: Context, libText: String?, ids: Set<String>?, open: (String) -> InputStream?): Int {
         if (libText == null) return 0
-        val mine = Store.loadLibrary(c); val a = JSONArray(libText); var n = 0
-        for (i in 0 until a.length()) {
-            val o = a.getJSONObject(i)
-            val s = Score(o.getString("id"), o.optString("title"), o.optString("composer"), o.getString("file"), o.optLong("added"), o.optString("origName"))
+        val mine = Store.loadLibrary(c); var n = 0
+        for (s in parseLib(libText)) {
+            if (ids != null && s.id !in ids) continue
             val pdf = open(s.file) ?: continue
+            // the same piece under another id (imported again on this phone): the backup copy takes its place
+            sameOnPhone(mine, s)?.let { old -> if (old.id != s.id) { Store.deleteScore(c, old); mine.remove(old) } }
             pdf.use { inp -> File(Store.scoreDir(c), s.file).outputStream().use { inp.copyTo(it) } }
             open("${s.id}.json")?.use { inp -> File(Store.scoreDir(c), "${s.id}.json").outputStream().use { inp.copyTo(it) } }
             open("${s.id}.musicxml")?.use { inp -> File(Store.scoreDir(c), "${s.id}.musicxml").outputStream().use { inp.copyTo(it) } }
@@ -117,6 +157,6 @@ object Backup {
         val lib = root.findFile("library.json") ?: return 0
         val text = c.contentResolver.openInputStream(lib.uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
         val sd = root.findFile("scores")
-        return mergeFrom(c, text) { name -> sd?.findFile(name)?.let { c.contentResolver.openInputStream(it.uri) } }
+        return mergeFrom(c, text, null) { name -> sd?.findFile(name)?.let { c.contentResolver.openInputStream(it.uri) } }
     }
 }

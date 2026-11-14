@@ -44,14 +44,57 @@ class MainActivity : AppCompatActivity() {
     }
     private val makeBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         if (uri != null) background("백업 만드는 중…") {
-            contentResolver.openOutputStream(uri)!!.use { Backup.writeZip(this, it) }; "백업 파일을 저장했습니다"
+            val ids = backupIds
+            contentResolver.openOutputStream(uri)!!.use { Backup.writeZip(this, it, ids) }
+            "백업 파일을 저장했습니다 (악보 ${ids?.size ?: Store.loadLibrary(this).size}개)"
         }
     }
     private val loadBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) background("백업 불러오는 중…") {
-            val n = contentResolver.openInputStream(uri)!!.use { Backup.readZip(this, it) }
-            Backup.sync(this); "악보 ${n}개를 불러왔습니다"
+        if (uri != null) {
+            val dlg = AlertDialog.Builder(this).setMessage("백업 파일을 여는 중…").setCancelable(false).show()
+            Thread {
+                val list = try { contentResolver.openInputStream(uri)!!.use { Backup.openZip(this, it) } } catch (e: Exception) { null }
+                runOnUiThread { dlg.dismiss(); if (list.isNullOrEmpty()) Toast.makeText(this, "백업 파일에 악보가 없습니다", Toast.LENGTH_LONG).show() else chooseRestore(list) }
+            }.start()
         }
+    }
+    private var backupIds: Set<String>? = null
+
+    private fun scoreLine(s: Score) = (if (s.composer.isNotBlank()) s.composer + " - " else "") + s.shownTitle
+
+    /** which scores go into the backup file */
+    private fun chooseBackup() {
+        val lib = Store.loadLibrary(this).sortedWith(compareBy({ it.composer }, { it.shownTitle }))
+        if (lib.isEmpty()) { Toast.makeText(this, "저장할 악보가 없습니다", Toast.LENGTH_LONG).show(); return }
+        val checked = BooleanArray(lib.size) { true }
+        val name = "오선노트_백업_" + java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.KOREA).format(java.util.Date())
+        AlertDialog.Builder(this).setTitle("백업할 악보 고르기")
+            .setMultiChoiceItems(lib.map { scoreLine(it) }.toTypedArray(), checked) { _, i, v -> checked[i] = v }
+            .setNegativeButton("취소", null)
+            .setNeutralButton("전체 저장") { _, _ -> backupIds = null; makeBackup.launch("$name.zip") }
+            .setPositiveButton("고른 것 저장") { _, _ ->
+                val ids = lib.filterIndexed { i, _ -> checked[i] }.map { it.id }.toSet()
+                if (ids.isEmpty()) { Toast.makeText(this, "고른 악보가 없습니다", Toast.LENGTH_LONG).show(); return@setPositiveButton }
+                backupIds = ids; makeBackup.launch(if (ids.size == lib.size) "$name.zip" else "${name}_${ids.size}곡.zip")
+            }.show()
+    }
+
+    /** which scores to load from a backup; scores on the phone stay, the same piece is replaced by the backup copy */
+    private fun chooseRestore(list: List<Score>) {
+        val mine = Store.loadLibrary(this)
+        val items = list.map { s -> scoreLine(s) + if (Backup.sameOnPhone(mine, s) != null) "  (있음 → 덮어씀)" else "  (새 악보)" }
+        val checked = BooleanArray(list.size) { true }
+        AlertDialog.Builder(this).setTitle("불러올 악보 고르기")
+            .setMultiChoiceItems(items.toTypedArray(), checked) { _, i, v -> checked[i] = v }
+            .setNegativeButton("취소", null)
+            .setPositiveButton("불러오기") { _, _ ->
+                val ids = list.filterIndexed { i, _ -> checked[i] }.map { it.id }.toSet()
+                if (ids.isEmpty()) return@setPositiveButton
+                background("백업 불러오는 중…") {
+                    val n = Backup.loadOpened(this, ids); Backup.sync(this)
+                    "악보 ${n}개를 불러왔습니다 (휴대폰에 있던 다른 악보는 그대로입니다)"
+                }
+            }.show()
     }
 
     private fun background(msg: String, work: () -> String) {
@@ -83,7 +126,7 @@ class MainActivity : AppCompatActivity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {
             1 -> pickFolder.launch(null)
-            2 -> makeBackup.launch("오선노트_백업_" + java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.KOREA).format(java.util.Date()) + ".zip")
+            2 -> chooseBackup()
             4 -> {
                 val ver = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (e: Exception) { "" }
                 AlertDialog.Builder(this).setTitle(getString(R.string.app_name))
