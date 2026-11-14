@@ -18,7 +18,7 @@
             android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="손" />
         <Button android:id="@+id/btnRange" style="?attr/materialButtonOutlinedStyle"
             android:minWidth="0dp" android:minHeight="0dp" android:paddingStart="9dp" android:paddingEnd="9dp" android:textSize="13sp"
-            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="범위" />
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="연습" />
         <Button android:id="@+id/btnFix" style="?attr/materialButtonOutlinedStyle"
             android:minWidth="0dp" android:minHeight="0dp" android:paddingStart="9dp" android:paddingEnd="9dp" android:textSize="13sp"
             android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="색" />

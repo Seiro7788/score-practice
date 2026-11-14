@@ -150,7 +150,7 @@ object PracticeLog {
             body.addView(HorizontalScrollView(a).apply { addView(chips) })
 
             // ranges: page order, progress bars; tap = go there, long-press = edit
-            if (rs.isEmpty()) body.addView(TextView(a).apply { text = "\n연습 범위가 없습니다. 악보에서 [범위]를 눌러 만드세요."; textSize = 15f })
+            if (rs.isEmpty()) body.addView(TextView(a).apply { text = "\n연습 구간이 없습니다. 악보에서 [연습]을 눌러 만드세요."; textSize = 15f })
             for (r in rs.sortedWith(compareBy({ it.page }, { it.y0 }, { it.x0 }))) {
                 val col = data.layer(r.layer)?.color ?: Color.GRAY
                 val row = LinearLayout(a).apply {

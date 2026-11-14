@@ -119,7 +119,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
         btnRange.setOnClickListener {
             if (!data.showRanges && mode != PageView.Mode.RANGE && data.ranges.isNotEmpty()) {   // hidden: show them again first
-                data.showRanges = true; persist(); updatePracticeBar(); toast("연습 범위를 다시 보입니다 (한 번 더 누르면 범위 만들기)"); return@setOnClickListener
+                data.showRanges = true; persist(); updatePracticeBar(); toast("연습 구간을 다시 보입니다 (한 번 더 누르면 새 구간 만들기)"); return@setOnClickListener
             }
             switchMode(if (mode == PageView.Mode.RANGE) PageView.Mode.VIEW else PageView.Mode.RANGE)
         }
@@ -217,7 +217,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         fixBar.visibility = if (m == PageView.Mode.FIX) View.VISIBLE else View.GONE
         fingerBar.visibility = if (m == PageView.Mode.FINGER) View.VISIBLE else View.GONE
         if (m == PageView.Mode.FIX && !data.showFixes) { data.showFixes = true; redraw() }
-        btnRange.text = if (m == PageView.Mode.RANGE) "범위 끝" else "범위"
+        btnRange.text = if (m == PageView.Mode.RANGE) "연습 끝" else "연습"
         if (m == PageView.Mode.RANGE) toast("연습할 부분을 손가락으로 끌어 네모를 그리세요")
         if (m == PageView.Mode.FINGER) { fingerLayerLabel?.invoke(); data.layer(data.activeLayer)?.let { if (!it.visible) { it.visible = true; redraw() } } }
         if (m == PageView.Mode.PEN) { penLayerLabel?.invoke(); data.layer(data.activeLayer)?.let { if (!it.visible) { it.visible = true; redraw() } }; erasing = false; if (!data.showInk) { data.showInk = true; redraw() } }
@@ -267,19 +267,9 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     override fun onTripleTap(r: Range?) {
         if (mode != PageView.Mode.VIEW) return
-        val t = r ?: currentRange() ?: run { toast("이 쪽에 연습 범위가 없습니다 — [범위]로 먼저 만드세요"); return }
+        val t = r ?: currentRange() ?: run { toast("이 쪽에 연습 구간이 없습니다 — [연습]으로 먼저 만드세요"); return }
         if (!data.showRanges) { data.showRanges = true }
         plusOne(t)
-    }
-
-    // volume keys: + / − practice while the practice bar is showing (can be switched off in the menu)
-    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
-        if (prefs.getBoolean("volKeys", true) && practiceBar.visibility == View.VISIBLE && mode == PageView.Mode.VIEW) {
-            val r = currentRange()
-            if (r != null && keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) { plusOne(r); return true }
-            if (r != null && keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) { minusOne(r); return true }
-        }
-        return super.onKeyDown(keyCode, event)
     }
 
     private fun setupPractice() {
@@ -300,7 +290,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         // close: hide the ranges and this bar; [범위] shows them again
         practiceBar.addView(Button(this).apply {
             text = "✕"; minWidth = 0; minimumWidth = 0; setPadding(24, 0, 24, 0)
-            setOnClickListener { data.showRanges = false; persist(); updatePracticeBar(); toast("연습 범위를 숨겼습니다 — 위의 [범위]를 누르면 다시 보입니다") }
+            setOnClickListener { data.showRanges = false; persist(); updatePracticeBar(); toast("연습 구간을 숨겼습니다 — 위의 [연습]을 누르면 다시 보입니다") }
         }, 0)
     }
 
@@ -626,7 +616,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     }
 
     override fun onRangeLongPress(r: Range) {
-        AlertDialog.Builder(this).setTitle(r.name.ifEmpty { "연습 범위" } + "  (${r.count}/${r.target})")
+        AlertDialog.Builder(this).setTitle(r.name.ifEmpty { "연습 구간" } + "  (${r.count}/${r.target})")
             .setItems(arrayOf("횟수 -1", "이름·목표 횟수 수정", "횟수 0으로", "연습 기록 보기", "다른 레이어로 옮기기", "삭제")) { _, w ->
                 when (w) {
                     0 -> { if (r.count > 0) { r.count--; if (r.log.isNotEmpty()) r.log.removeAt(r.log.size - 1) } }
@@ -662,7 +652,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         val t = EditText(this).apply { hint = "목표 횟수"; inputType = InputType.TYPE_CLASS_NUMBER; setText(target.toString()) }
         box.addView(TextView(this).apply { text = "레이어: " + (data.layer(data.activeLayer)?.name ?: "") })
         box.addView(n); box.addView(t)
-        AlertDialog.Builder(this).setTitle("연습 범위").setView(box)
+        AlertDialog.Builder(this).setTitle("연습 구간").setView(box)
             .setPositiveButton("저장") { _, _ -> ok(n.text.toString().trim(), t.text.toString().toIntOrNull()?.coerceAtLeast(1) ?: 10) }
             .setNegativeButton("취소", null).show()
     }
@@ -677,12 +667,12 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     private fun layerDialog() {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(40, 16, 40, 0) }
-        box.addView(TextView(this).apply { text = "체크 = 보이기,  ● = 지금 쓰는 레이어 (새 범위·필기가 들어감)" })
+        box.addView(TextView(this).apply { text = "체크 = 보이기,  ● = 지금 쓰는 레이어 (새 연습 구간·필기·손번호가 들어감)" })
         for (l in data.layers) {
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val cb = CheckBox(this).apply { isChecked = l.visible; setOnCheckedChangeListener { _, v -> l.visible = v; save(); redraw() } }
             val rb = RadioButton(this).apply {
-                text = "${l.name}  (범위 ${data.ranges.count { it.layer == l.id }} · 필기 ${data.strokes.count { it.layer == l.id }} · 손번호 ${data.fingers.count { it.layer == l.id }})"; setTextColor(l.color); isChecked = l.id == data.activeLayer
+                text = "${l.name}  (연습 ${data.ranges.count { it.layer == l.id }} · 필기 ${data.strokes.count { it.layer == l.id }} · 손번호 ${data.fingers.count { it.layer == l.id }})"; setTextColor(l.color); isChecked = l.id == data.activeLayer
                 setOnClickListener { data.activeLayer = l.id; save() }
             }
             row.addView(cb); row.addView(rb)
@@ -721,7 +711,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     }
 
     private fun layerEdit(l: Layer) {
-        AlertDialog.Builder(this).setTitle(l.name).setItems(arrayOf("이름 바꾸기", "횟수 모두 0으로", "레이어 삭제(범위·필기 포함)")) { _, w ->
+        AlertDialog.Builder(this).setTitle(l.name).setItems(arrayOf("이름 바꾸기", "횟수 모두 0으로", "레이어 삭제(연습 구간·필기·손번호 포함)")) { _, w ->
             when (w) {
                 0 -> { val e = EditText(this).apply { setText(l.name) }
                     AlertDialog.Builder(this).setView(e).setPositiveButton("저장") { _, _ -> l.name = e.text.toString(); save() }.show() }
@@ -738,8 +728,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private fun menuDialog() {
         val dir = if (prefs.getBoolean("swipeRightNext", false)) "지금: 오른쪽으로 밀면 다음 쪽" else "지금: 왼쪽으로 밀면 다음 쪽"
         AlertDialog.Builder(this).setItems(arrayOf("연습 기록", "PDF로 저장", "쪽 이동", "넘김 방향 바꾸기 ($dir)", "이 쪽 필기 모두 지우기",
-            if (half) "반 페이지 넘김 끄기" else "반 페이지 넘김 켜기", "원본 PDF 바꾸기",
-            if (prefs.getBoolean("volKeys", true)) "볼륨 버튼으로 +1/−1 끄기" else "볼륨 버튼으로 +1/−1 켜기")) { _, w ->
+            if (half) "반 페이지 넘김 끄기" else "반 페이지 넘김 켜기", "원본 PDF 바꾸기"))  { _, w ->
             when (w) {
                 0 -> openRecord()
                 1 -> exportDialog()
@@ -749,8 +738,6 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                     }.show() }
                 5 -> setHalf(!half)
                 6 -> pickNewPdf.launch(arrayOf("application/pdf"))
-                7 -> { val v = !prefs.getBoolean("volKeys", true); prefs.edit().putBoolean("volKeys", v).apply()
-                    toast(if (v) "연습 바가 보일 때 볼륨 ▲ = +1, ▼ = −1" else "볼륨 버튼은 원래대로 소리 크기") }
                 3 -> { prefs.edit().putBoolean("swipeRightNext", !prefs.getBoolean("swipeRightNext", false)).apply(); applyDirection() }
                 4 -> { val p = primaryPage(pager.currentItem)
                     AlertDialog.Builder(this).setMessage("${p + 1}쪽의 필기를 모두 지울까요?").setPositiveButton("지우기") { _, _ ->
@@ -775,7 +762,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         val kInk = cb("필기·형광펜", data.strokes.size)
         val kFix = cb("색 고친 것 (자동 색칠 포함)", data.fixes.size)
         val kFin = cb("손번호 (PDF)", data.fingers.size)
-        val kRng = cb("연습 범위 (네모·횟수·기록)", data.ranges.size)
+        val kRng = cb("연습 구간 (표시·횟수·기록)", data.ranges.size)
         box.addView(TextView(this).apply { text = "XML 악보와 XML 손번호, 메트로놈 설정은 그대로입니다."; textSize = 12f; setPadding(0, 12, 0, 0) })
         AlertDialog.Builder(this).setTitle("원본 PDF 바꾸기").setView(box)
             .setNegativeButton("취소") { _, _ -> nf.delete() }
@@ -807,7 +794,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             Triple("색 고친 것", exportOpt.fixes) { v: Boolean -> exportOpt.fixes = v },
             Triple("필기", exportOpt.ink) { v: Boolean -> exportOpt.ink = v },
             Triple("손번호", exportOpt.fingers) { v: Boolean -> exportOpt.fingers = v },
-            Triple("연습 범위(네모·횟수)", exportOpt.ranges) { v: Boolean -> exportOpt.ranges = v })
+            Triple("연습 구간(표시·횟수)", exportOpt.ranges) { v: Boolean -> exportOpt.ranges = v })
         for ((name, on, set) in items) box.addView(CheckBox(this).apply { text = name; isChecked = on; setOnCheckedChangeListener { _, v -> set(v) } })
         AlertDialog.Builder(this).setTitle("PDF로 저장 — 넣을 것").setView(box)
             .setPositiveButton("저장 위치 고르기") { _, _ ->
@@ -838,12 +825,12 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
 
     private fun rangeList() {
         val rs = data.ranges.sortedWith(compareBy({ it.page }, { it.y0 }, { it.x0 }))
-        if (rs.isEmpty()) { toast("연습 범위가 없습니다. '범위'를 눌러 만드세요"); return }
+        if (rs.isEmpty()) { toast("연습 구간이 없습니다. '연습'을 눌러 만드세요"); return }
         val items = rs.map { r ->
             val l = data.layer(r.layer)?.name ?: ""
             "${r.page + 1}쪽  ${r.name}  [${l}]  ${r.count}/${r.target}" + if (r.count >= r.target) " ✓" else ""
         }.toTypedArray()
-        AlertDialog.Builder(this).setTitle("연습 범위 (누르면 그 쪽으로)").setItems(items) { _, i ->
+        AlertDialog.Builder(this).setTitle("연습 구간 (누르면 그 쪽으로)").setItems(items) { _, i ->
             pager.setCurrentItem(posOf(rs[i].page), false)
         }.setPositiveButton("닫기", null).show()
     }
