@@ -298,18 +298,22 @@ class PageView(context: Context, private val host: Host) : View(context) {
             HeadFix.drawManual(c, sx(p0.first), sy(p0.second), mv.r * dst.width(), mv.rb * dst.width(), mv.hollow, mv.color)
             mark.strokeWidth = 3f / z; c.drawCircle(sx(p0.first), sy(p0.second), mv.r * dst.width() * 1.6f, mark); mark.strokeWidth = 3f } }
         for (r in visibleRanges()) {
+            // practice range: no fill — only a ┌ at the start and a ┘ at the end, see-through
             val col = host.data.layer(r.layer)?.color ?: Color.RED
             val done = r.count >= r.target && r.target > 0
             val sel = r.id == host.selectedRange
-            fill.color = Color.argb(if (sel) 70 else if (done) 30 else 45, Color.red(col), Color.green(col), Color.blue(col))
-            edge.color = col; edge.strokeWidth = (if (sel) 9f else 4f) / z
+            val alpha = if (sel) 200 else 120
+            edge.color = Color.argb(alpha, Color.red(col), Color.green(col), Color.blue(col)); edge.strokeWidth = (if (sel) 9f else 6f) / z
+            edge.strokeCap = Paint.Cap.ROUND
             val rr = RectF(sx(r.x0), sy(r.y0), sx(r.x1), sy(r.y1))
-            c.drawRect(rr, fill); c.drawRect(rr, edge)
+            val arm = minOf(rr.width(), rr.height()) * 0.35f
+            c.drawLine(rr.left, rr.top, rr.left + arm, rr.top, edge); c.drawLine(rr.left, rr.top, rr.left, rr.top + arm, edge)
+            c.drawLine(rr.right, rr.bottom, rr.right - arm, rr.bottom, edge); c.drawLine(rr.right, rr.bottom, rr.right, rr.bottom - arm, edge)
+            edge.strokeCap = Paint.Cap.BUTT
             val t = (if (r.name.isNotEmpty()) r.name + "  " else "") + "${r.count}/${r.target}" + if (done) " ✓" else ""
-            label.textSize = 34f / z
-            val tw = label.measureText(t)
-            c.drawRect(rr.left, rr.top - 40f / z, rr.left + tw + 16f / z, rr.top, labelBg)
-            label.color = col; c.drawText(t, rr.left + 8f / z, rr.top - 9f / z, label)
+            label.textSize = 30f / z
+            label.color = Color.argb(if (sel) 230 else 150, Color.red(col), Color.green(col), Color.blue(col))
+            c.drawText(t, rr.left + 4f / z, rr.top - 8f / z, label)
         }
         for (g in host.data.fingers) if (g.page == page && (host.data.fingerVisible(g) || (host.mode == Mode.FINGER && g.layer == host.data.activeLayer))) {
             val ts = g.s * dst.width() * 1.7f * host.data.fingerScale

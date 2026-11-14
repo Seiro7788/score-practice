@@ -121,6 +121,25 @@ object PracticeLog {
             body.addView(DayChart(a, IntArray(14) { per[days[it].first] ?: 0 }, labels, 13), LinearLayout.LayoutParams(-1, dp(150)))
             body.addView(TextView(a).apply { text = "최근 14일 연습 횟수 (분홍 = 오늘)"; textSize = 12f; alpha = 0.6f; gravity = Gravity.CENTER })
 
+            // when in the day
+            val all = rs.flatMap { r -> r.log.indices.map { i -> Triple(r, r.log[i], r.bpmAt(i)) } }
+            if (all.isNotEmpty()) {
+                val slots = listOf("아침 5–12시" to (5..11), "오후 12–18시" to (12..17), "저녁 18–24시" to (18..23), "밤 0–5시" to (0..4))
+                val hourOf = { t: Long -> Calendar.getInstance().apply { timeInMillis = t }.get(Calendar.HOUR_OF_DAY) }
+                body.addView(TextView(a).apply {
+                    text = "연습한 시간대: " + slots.joinToString("  ·  ") { (n, h) -> "$n ${all.count { hourOf(it.second) in h }}회" }
+                    textSize = 13f; setPadding(0, dp(8), 0, 0)
+                })
+                // latest entries: when · where · tempo
+                body.addView(TextView(a).apply { text = "최근 기록"; textSize = 16f; setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, dp(12), 0, dp(2)) })
+                val fmt = java.text.SimpleDateFormat("M/d (E) HH:mm", java.util.Locale.KOREA)
+                for ((r, t, bpm) in all.sortedByDescending { it.second }.take(15)) body.addView(TextView(a).apply {
+                    text = "${fmt.format(java.util.Date(t))}  ·  ${r.label()}" + if (bpm > 0) "  ·  ♩=$bpm" else ""
+                    textSize = 13f; setPadding(dp(4), dp(2), 0, dp(2))
+                    setTextColor(data.layer(r.layer)?.color ?: Color.DKGRAY)
+                })
+            }
+
             // layer filter chips
             val chips = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(10), 0, dp(4)) }
             val opts = listOf<Pair<String?, String>>(null to "전체") + data.layers.map { it.id to it.name }
@@ -141,16 +160,31 @@ object PracticeLog {
                 row.addView(View(a).apply { setBackgroundColor(col) }, LinearLayout.LayoutParams(dp(6), dp(48)).apply { marginEnd = dp(10) })
                 val mid = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
                 val done = r.count >= r.target
-                mid.addView(TextView(a).apply { text = "${r.page + 1}쪽 · ${r.name.ifEmpty { "연습 범위" }}" + if (done) "  ✓" else ""; textSize = 16f })
+                mid.addView(TextView(a).apply { text = r.label() + if (done) "  ✓" else ""; textSize = 16f })
                 mid.addView(ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal).apply {
                     max = maxOf(1, r.target); progress = minOf(r.count, r.target)
                 }, LinearLayout.LayoutParams(-1, dp(14)))
                 val todayN = r.log.count { PracticeStats.dayKey(it) == today }
+                val week = r.log.count { t -> days.takeLast(7).any { it.first == PracticeStats.dayKey(t) } }
                 val last = r.log.maxOrNull()
+                val tempos = r.log.indices.map { r.bpmAt(it) }.filter { it > 0 }
                 mid.addView(TextView(a).apply {
-                    text = "${r.count} / ${r.target}회 · 오늘 ${todayN}회" + (if (last != null) " · 마지막 ${PracticeStats.ago(last)}" else " · 아직 안 함")
+                    text = "${r.count} / ${r.target}회 · 오늘 ${todayN}회 · 7일 ${week}회" +
+                        (if (tempos.isNotEmpty()) " · ♩=${tempos.min()}~${tempos.max()}" else "") +
+                        (if (last != null) " · 마지막 ${PracticeStats.ago(last)}" else " · 아직 안 함")
                     textSize = 13f; alpha = 0.75f
                 })
+                // this range's own entries (folded)
+                val detail = TextView(a).apply {
+                    val fmt = java.text.SimpleDateFormat("M/d HH:mm", java.util.Locale.KOREA)
+                    text = r.log.indices.reversed().take(40).joinToString("\n") { i -> fmt.format(java.util.Date(r.log[i])) + (r.bpmAt(i).let { b -> if (b > 0) "  ♩=$b" else "" }) }
+                    textSize = 12f; visibility = View.GONE; setPadding(0, dp(4), 0, 0)
+                }
+                if (r.log.isNotEmpty()) {
+                    mid.addView(TextView(a).apply { text = "▸ 기록 ${r.log.size}개 보기"; textSize = 12f; setTextColor(Color.rgb(63, 81, 181)); setPadding(0, dp(4), 0, 0)
+                        setOnClickListener { val open = detail.visibility == View.GONE; detail.visibility = if (open) View.VISIBLE else View.GONE; text = (if (open) "▾" else "▸") + " 기록 ${r.log.size}개 " + if (open) "접기" else "보기" } })
+                    mid.addView(detail)
+                }
                 row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
                 row.setOnClickListener { dlg.dismiss(); onJump(r) }
                 row.setOnLongClickListener { dlg.dismiss(); onEdit(r); true }

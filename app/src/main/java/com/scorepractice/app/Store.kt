@@ -31,8 +31,19 @@ data class Range(
     var name: String,
     var target: Int,
     var count: Int = 0,
-    val log: MutableList<Long> = mutableListOf()
-)
+    val log: MutableList<Long> = mutableListOf(),
+    val bpms: MutableList<Int> = mutableListOf()    // metronome tempo for each log entry (0 = metronome not running)
+) {
+    /** where on the page, in words: "3쪽 위쪽", "5쪽 가운데 왼쪽" */
+    fun where(): String {
+        val cy = (y0 + y1) / 2; val cx = (x0 + x1) / 2
+        val v = if (cy < 0.36f) "위쪽" else if (cy > 0.64f) "아래쪽" else "가운데"
+        val h = if (x1 - x0 > 0.6f) "" else if (cx < 0.4f) " 왼쪽" else if (cx > 0.6f) " 오른쪽" else ""
+        return "${page + 1}쪽 $v$h"
+    }
+    fun label() = if (name.isNotEmpty()) "$name (${where()})" else where()
+    fun bpmAt(i: Int) = bpms.getOrNull(i - (log.size - bpms.size)) ?: 0
+}
 
 /** colour correction on an already-coloured score: a notehead-shaped patch (normalized coords, r = width/page width) */
 data class Fix(val page: Int, val x: Float, val y: Float, val r: Float, val color: Int, val hollow: Boolean, val rb: Float = r * 0.71f,
@@ -139,7 +150,8 @@ object Store {
                 d.ranges.add(Range(r.getString("id"), r.getString("layer"), r.getInt("page"),
                     r.getDouble("x0").toFloat(), r.getDouble("y0").toFloat(),
                     r.getDouble("x1").toFloat(), r.getDouble("y1").toFloat(),
-                    r.optString("name"), r.optInt("target", 10), r.optInt("count", 0), log))
+                    r.optString("name"), r.optInt("target", 10), r.optInt("count", 0), log,
+                    (r.optJSONArray("bpms") ?: JSONArray()).let { b -> MutableList(b.length()) { b.getInt(it) } }))
             }
             val sa = o.optJSONArray("strokes") ?: JSONArray()
             for (i in 0 until sa.length()) {
@@ -190,7 +202,8 @@ object Store {
                 put(JSONObject().put("id", r.id).put("layer", r.layer).put("page", r.page)
                     .put("x0", r.x0.toDouble()).put("y0", r.y0.toDouble()).put("x1", r.x1.toDouble()).put("y1", r.y1.toDouble())
                     .put("name", r.name).put("target", r.target).put("count", r.count)
-                    .put("log", JSONArray().apply { r.log.forEach { put(it) } }))
+                    .put("log", JSONArray().apply { r.log.forEach { put(it) } })
+                    .put("bpms", JSONArray().apply { r.bpms.forEach { put(it) } }))
             }
         })
         o.put("strokes", JSONArray().apply {

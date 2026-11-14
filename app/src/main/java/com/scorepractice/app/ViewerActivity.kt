@@ -236,7 +236,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         practiceBar.visibility = if (r == null || immersive) View.GONE else View.VISIBLE
         if (r != null) {
             val n = pageRanges().size
-            rName.text = (r.name.ifEmpty { "연습 범위" }) + "\n" + "${r.count} / ${r.target}회" +
+            val todayN = r.log.count { PracticeStats.dayKey(it) == PracticeStats.today() }
+            rName.text = r.label() + "\n" + "${r.count} / ${r.target}회 · 오늘 ${todayN}회" +
                 (if (r.count >= r.target) "  ✓" else "") + if (n > 1) "   (${pageRanges().indexOf(r) + 1}/$n)" else ""
         }
         redraw()
@@ -246,12 +247,16 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         practiceBar = findViewById(R.id.practiceBar); rName = findViewById(R.id.rName)
         findViewById<Button>(R.id.rPlus).setOnClickListener {
             val r = currentRange() ?: return@setOnClickListener
-            r.count++; r.log.add(System.currentTimeMillis()); save(); updatePracticeBar()
+            // the record: when, where, and the metronome tempo if it was ticking
+            while (r.bpms.size < r.log.size) r.bpms.add(0, 0)
+            val bpm = if (metro.isRunning) metro.bpm else 0
+            r.count++; r.log.add(System.currentTimeMillis()); r.bpms.add(bpm); save(); updatePracticeBar()
             if (r.count == r.target) toast("목표 ${r.target}회 달성!")
+            else toast("${r.label()} +1  (${r.count}/${r.target}${if (bpm > 0) " · ♩=$bpm" else ""})")
         }
         findViewById<Button>(R.id.rMinus).setOnClickListener {
             val r = currentRange() ?: return@setOnClickListener
-            if (r.count > 0) { r.count--; if (r.log.isNotEmpty()) r.log.removeAt(r.log.size - 1); save(); updatePracticeBar() }
+            if (r.count > 0) { r.count--; if (r.log.isNotEmpty()) r.log.removeAt(r.log.size - 1); if (r.bpms.size > r.log.size) r.bpms.removeAt(r.bpms.size - 1); save(); updatePracticeBar() }
         }
         val step = { d: Int ->
             val rs = pageRanges()
