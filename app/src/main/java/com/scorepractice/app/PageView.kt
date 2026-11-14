@@ -41,8 +41,8 @@ class PageView(context: Context, private val host: Host) : View(context) {
         fun onInkChanged()
         fun onZoomChanged(zoomed: Boolean)
         fun onFixTap(page: Int, x: Float, y: Float, head: HeadFix.Head?, w: Int, h: Int, color: Int? = null)
-        val fixPlace: Int              // 0 = find the note, 1 = place a hollow head by hand, 2 = place a filled head
-        fun onFixPlace(page: Int, x: Float, y: Float, r: Float, rb: Float, hollow: Boolean)
+        val fixPlace: Int              // long press on an empty spot places: 0 = a hollow head (half note), 1 = a filled head (quarter)
+        fun onFixPlace(page: Int, x: Float, y: Float, r: Float, rb: Float, hollow: Boolean, color: Int?)
         fun onFixMoved(old: Fix, x: Float, y: Float)
         val fixPalette: List<Int>      // black, ♯ black key, ♯ white key, ♭ black key, ♭ white key, × black key, × white key
         fun onFingerAdd(f: Finger)
@@ -314,6 +314,11 @@ class PageView(context: Context, private val host: Host) : View(context) {
         c.save(); c.clipRect(segRects[i])
         c.drawBitmap(b, null, dst, bmpPaint)
         drawFixes(c, segs[i].page)
+        placing?.let { pl -> if (page == segs[i].page) {
+            val (r, rb) = typicalHead(page); val n = cNow; val s0 = cStart
+            val k = if (n != null && s0 != null && hypot(n.first - s0.first, n.second - s0.second) >= 30f) colourChoice(n.first - s0.first, n.second - s0.second) else -2
+            val col = if (k >= 0) host.fixPalette[k] else Color.argb(160, 120, 120, 120)
+            HeadFix.drawManual(c, sx(pl.first), sy(pl.second), r * dst.width(), rb * dst.width(), host.fixPlace != 1, col) } }
         moving?.let { mv -> val p0 = movePos; if (mv.page == segs[i].page && p0 != null) {
             HeadFix.drawManual(c, sx(p0.first), sy(p0.second), mv.r * dst.width(), mv.rb * dst.width(), mv.hollow, mv.color)
             mark.strokeWidth = 3f / z; c.drawCircle(sx(p0.first), sy(p0.second), mv.r * dst.width() * 1.6f, mark); mark.strokeWidth = 3f } }
@@ -486,14 +491,32 @@ class PageView(context: Context, private val host: Host) : View(context) {
                     val x = nx(e.x); val y = ny(e.y)
                     val near = host.data.fixes.filter { it.page == page && abs(it.x - x) < it.r * 1.4f && abs((it.y - y) * dst.height() / dst.width()) < it.rb * 1.8f }
                         .minByOrNull { abs(it.x - x) + abs(it.y - y) }
-                    if (near != null) {
-                        val r = Runnable { if (hypot(lastMoveX - downX, lastMoveY - downY) < 15f) { moving = near; movePos = near.x to near.y; cStart = null; cNow = null
+                    lastMoveX = e.x; lastMoveY = e.y
+                    val r = if (near != null) Runnable {
+                        if (hypot(lastMoveX - downX, lastMoveY - downY) < 15f) { moving = near; movePos = near.x to near.y; cStart = null; cNow = null
                             performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); invalidate() } }
-                        pickUp = r; lastMoveX = e.x; lastMoveY = e.y; postDelayed(r, 380)
-                    }
+                    // hold an empty spot (or a note that isn't found): a head appears there; swipe to pick its colour
+                    else Runnable {
+                        if (hypot(lastMoveX - downX, lastMoveY - downY) < 15f) { placing = x to y; cStart = downX to downY; cNow = downX to downY
+                            performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); invalidate() } }
+                    pickUp = r; postDelayed(r, 420)
                 }
                 if (am == MotionEvent.ACTION_MOVE) { lastMoveX = e.x; lastMoveY = e.y }
                 if (am == MotionEvent.ACTION_UP || am == MotionEvent.ACTION_CANCEL) { pickUp?.let { removeCallbacks(it) }; pickUp = null }
+                placing?.let { pl ->
+                    when (am) {
+                        MotionEvent.ACTION_MOVE -> { cNow = e.x to e.y; invalidate() }
+                        MotionEvent.ACTION_UP -> {
+                            val moved = hypot(e.x - downX, e.y - downY) >= 30f
+                            val k = if (moved) colourChoice(e.x - downX, e.y - downY) else -2
+                            placing = null; cStart = null; cNow = null; invalidate()
+                            if (k != -1) { val (r, rb) = typicalHead(page)
+                                host.onFixPlace(page, pl.first, pl.second, r, rb, host.fixPlace != 1, if (k >= 0) host.fixPalette[k] else null) }
+                        }
+                        MotionEvent.ACTION_CANCEL -> { placing = null; cStart = null; cNow = null; invalidate() }
+                    }
+                    return true
+                }
                 moving?.let { mv ->
                     val start = mv.x to mv.y
                     when (am) {
@@ -515,13 +538,8 @@ class PageView(context: Context, private val host: Host) : View(context) {
                     return true
                 }
                 if (am == MotionEvent.ACTION_UP) { cStart = null; cNow = null; invalidate() }
-                if (am == MotionEvent.ACTION_UP && hypot(e.x - downX, e.y - downY) < 20f) {
-                    if (host.fixPlace > 0 && !host.fixAreaErase) {
-                        // by hand: a head the size of the others on this page, exactly where tapped
-                        val (r, rb) = typicalHead(page)
-                        host.onFixPlace(page, nx(e.x), ny(e.y), r, rb, host.fixPlace == 1)
-                    } else findHead(e.x, e.y) { pg, x, y, head, w, h -> host.onFixTap(pg, x, y, head, w, h) }
-                }
+                if (am == MotionEvent.ACTION_UP && hypot(e.x - downX, e.y - downY) < 20f)
+                    findHead(e.x, e.y) { pg, x, y, head, w, h -> host.onFixTap(pg, x, y, head, w, h) }
                 return true
             }
             Mode.RANGE -> {
@@ -556,6 +574,7 @@ class PageView(context: Context, private val host: Host) : View(context) {
     }
 
     private var moving: Fix? = null
+    private var placing: Pair<Float, Float>? = null
     private var movePos: Pair<Float, Float>? = null
     private var pickUp: Runnable? = null
     private var lastMoveX = 0f; private var lastMoveY = 0f
@@ -601,9 +620,9 @@ class PageView(context: Context, private val host: Host) : View(context) {
         val s0 = cStart ?: return; val n = cNow ?: return
         if (host.mode != Mode.FIX || host.fixAreaErase) return
         val dx = n.first - s0.first; val dy = n.second - s0.second
-        if (hypot(dx, dy) < 30f) return
+        if (hypot(dx, dy) < 30f && placing == null) return
         var a = Math.toDegrees(atan2(-dy.toDouble(), dx.toDouble())).toFloat(); if (a < 0) a += 360f
-        val sel = ((a + 22.5f) / 45f).toInt() % 8
+        val sel = if (hypot(dx, dy) < 30f) -1 else ((a + 22.5f) / 45f).toInt() % 8
         val R = 125f
         c.drawCircle(s0.first, s0.second, R + 55f, guideBg)
         val dot = Paint(Paint.ANTI_ALIAS_FLAG)

@@ -211,7 +211,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         mode = m
         updateUndoBox()
         if (m != PageView.Mode.FIX && fixAreaErase && ::areaBtn.isInitialized) areaBtn.performClick()
-        if (m != PageView.Mode.FIX && fixPlace != 0 && ::placeBtn.isInitialized) { fixPlace = 2; placeBtn.performClick() }
+
         pager.isUserInputEnabled = m == PageView.Mode.VIEW
         penBar.visibility = if (m == PageView.Mode.PEN) View.VISIBLE else View.GONE
         fixBar.visibility = if (m == PageView.Mode.FIX) View.VISIBLE else View.GONE
@@ -372,7 +372,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         }
         findViewById<Button>(R.id.btnFix).setOnClickListener {
             switchMode(if (mode == PageView.Mode.FIX) PageView.Mode.VIEW else PageView.Mode.FIX)
-            if (mode == PageView.Mode.FIX) toast("음표를 누르면 고른 색, 누른 채 밀면 방향의 색: ↗♯검은건반 ↖♯흰건반 ↘♭검은건반 ↙♭흰건반 →×검 ←×흰 ↑검정 ↓취소")
+            if (mode == PageView.Mode.FIX) toast("누르기 = 고른 색 · 누른 채 밀기 = 방향의 색 · 빈 곳을 길게 누르기 = 2분음표가 생기고 밀어서 색 고르기 · 색 음표를 길게 눌러 끌기 = 옮기기")
         }
         findViewById<Button>(R.id.fixDone).setOnClickListener { switchMode(PageView.Mode.VIEW) }
         // area eraser: drag a box over the page, the colours of the notes inside go
@@ -388,12 +388,11 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
         row.addView(areaBtn, row.childCount - 1)
         // place a head by hand where the note isn't found (size taken from the other notes on the page)
         placeBtn = Button(this).apply {
-            text = "직접 놓기"; isAllCaps = false
+            // what a long press on an empty spot puts there
+            text = "길게 누르면: 2분음표"; isAllCaps = false
             setOnClickListener {
-                fixPlace = (fixPlace + 1) % 3
-                text = arrayOf("직접 놓기", "직접: 빈 음표(2분)", "직접: 찬 음표(4분)")[fixPlace]
-                setTextColor(if (fixPlace > 0) Color.rgb(200, 30, 30) else Color.BLACK)
-                if (fixPlace == 1) toast("누른 자리에 빈 음표(2분음표) 모양을 놓습니다. 한 번 더 누르면 찬 음표(4분)")
+                fixPlace = (fixPlace + 1) % 2
+                text = if (fixPlace == 0) "길게 누르면: 2분음표" else "길게 누르면: 4분음표"
             }
         }
         row.addView(placeBtn, row.childCount - 1)
@@ -403,11 +402,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     override var fixPlace = 0
     private lateinit var placeBtn: Button
 
-    override fun onFixPlace(page: Int, x: Float, y: Float, r: Float, rb: Float, hollow: Boolean) {
-        val hit = data.fixes.filter { it.page == page && kotlin.math.abs(it.x - x) < it.r * 1.1f && kotlin.math.abs(it.y - y) < it.rb * 1.4f * 0.7f }
-            .minByOrNull { kotlin.math.abs(it.x - x) + kotlin.math.abs(it.y - y) }
-        if (hit != null) { data.fixes.remove(hit); save(); redraw(); fixInfo("색을 지웠습니다"); return }
-        data.fixes.add(Fix(page, x, y, r, fixColor, hollow, rb, manual = true)); save(); redraw()
+    override fun onFixPlace(page: Int, x: Float, y: Float, r: Float, rb: Float, hollow: Boolean, color: Int?) {
+        data.fixes.add(Fix(page, x, y, r, color ?: fixColor, hollow, rb, manual = true)); save(); redraw()
         fixInfo("${if (hollow) "빈 음표(2분)" else "찬 음표(4분)"}를 놓았습니다 — 꾹 눌러 끌면 옮겨집니다")
     }
 
