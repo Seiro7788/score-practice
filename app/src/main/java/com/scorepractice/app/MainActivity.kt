@@ -162,7 +162,9 @@ class MainActivity : AppCompatActivity() {
         list = findViewById(R.id.list); empty = findViewById(R.id.empty); search = findViewById(R.id.search)
         findViewById<Button>(R.id.syncReceive).setOnClickListener {
             background("받는 중…") { val n = Backup.receive(this); runOnUiThread { updateSyncBar() }
-                if (n < 0) "동기화 폴더를 읽지 못했습니다" else if (n == 0) "새로 받을 것이 없습니다" else "${n}곡을 받았습니다" } }
+                val w = Backup.waiting
+                (if (n < 0) "동기화 폴더를 읽지 못했습니다" else if (n == 0) "새로 받을 것이 없습니다" else "${n}곡을 받았습니다") +
+                    if (w > 0) "\n${w}곡은 다른 기기에서 올린 내용이 아직 드라이브에 다 올라가지 않았습니다. 잠시 뒤 다시 [받기]를 누르세요" else "" } }
         findViewById<Button>(R.id.syncSend).setOnClickListener {
             background("올리는 중…") { Backup.send(this).also { runOnUiThread { updateSyncBar() } } } }
         list.layoutManager = LinearLayoutManager(this)
@@ -196,6 +198,7 @@ class MainActivity : AppCompatActivity() {
             val n = Backup.receive(this)
             runOnUiThread {
                 if (n > 0) { all = Store.loadLibrary(this); refresh(); Toast.makeText(this, "다른 기기에서 고친 악보 ${n}곡을 받았습니다", Toast.LENGTH_LONG).show() }
+                if (Backup.waiting > 0) Toast.makeText(this, "다른 기기에서 올린 ${Backup.waiting}곡이 아직 드라이브에 다 올라가지 않았습니다 — 잠시 뒤 [받기]", Toast.LENGTH_LONG).show()
                 updateSyncBar()
             }
         }.start()

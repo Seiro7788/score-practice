@@ -213,8 +213,12 @@ object Backup {
         return n + d
     }
 
+    /** scores the folder lists as newer but whose file in the folder is still the old one (cloud upload not finished) */
+    @Volatile var waiting = 0
+
     /** take scores that are newer in the shared folder; returns how many came in (or -1 = no folder / not readable) */
     fun receive(c: Context): Int = synchronized(syncLock) {
+        waiting = 0
         val tree = folder(c) ?: return -1
         try {
             val rootId = DocumentsContract.getTreeDocumentId(tree)
@@ -234,15 +238,19 @@ object Backup {
                 if (tomb.has(id) && tomb.optLong(id) >= rs) continue                // deleted here later
                 val l = local.firstOrNull { it.id == id } ?: sameOnPhone(local, scoreOf(e))
                 if (l != null && rs <= Store.savedAt(c, l.id)) continue             // this phone has the same or newer
-                val js = files["$id.json"] ?: continue
+                val js = files["$id.json"] ?: run { waiting++; null } ?: continue
+                // the data file first, to a side file: a cloud folder can still hand out the old copy for a while
+                val part = File(c.cacheDir, "recv_$id.json"); download(c, tree, js, part)
+                val stampIn = Regex(",\"savedAt\":(\\d+)\\}\\s*$").find(part.readText())?.groupValues?.get(1)?.toLongOrNull() ?: 0
+                if (stampIn < rs) { part.delete(); waiting++; continue }                 // not the uploaded version yet
                 val sc = scoreOf(e)
                 val pdfLocal = File(Store.scoreDir(c), sc.file)
                 val pdfRemote = files[sc.file]
                 if (!(pdfLocal.exists() && (pdfRemote == null || pdfLocal.length() == pdfRemote.size))) {
-                    if (pdfRemote == null) continue                                  // PDF not uploaded (yet)
+                    if (pdfRemote == null) { part.delete(); waiting++; continue }    // PDF not uploaded (yet)
                     download(c, tree, pdfRemote, pdfLocal)
                 }
-                download(c, tree, js, File(Store.scoreDir(c), "$id.json"))
+                val dj = File(Store.scoreDir(c), "$id.json"); if (!part.renameTo(dj)) { part.copyTo(dj, true); part.delete() }
                 files["$id.musicxml"]?.let { download(c, tree, it, File(Store.scoreDir(c), "$id.musicxml")) }
                 if (l != null) {
                     if (l.id != id) { Store.deleteScore(c, l, remember = true); local.remove(l) }
