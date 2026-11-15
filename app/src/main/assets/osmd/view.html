@@ -12,6 +12,7 @@
   .ch { position: absolute; pointer-events: auto; cursor: pointer; text-align: center; line-height: 1.05; white-space: nowrap; transform: translateX(-50%); background: rgba(255,255,255,.88); border-radius: 3px; padding: 0 2px; }
   .ch b { display: block; color: #3f51b5; font-size: 12px; }
   .ch i { display: block; color: #b0306a; font-style: normal; font-size: 11px; }
+  .ch b small { color: #e65100; font-size: 10px; margin-left: 1px; }
   .ch u { display: block; color: #c62828; font-size: 10px; text-decoration: none; font-weight: bold; }
   .ch.sel { outline: 2px solid #ff9800; }
   .chf { position: absolute; height: 5px; border-radius: 2px; pointer-events: none; opacity: .75; }
@@ -98,6 +99,7 @@
       }
       const d = document.createElement('div'); d.className = 'ch'; d.dataset.i = idx;
       d.innerHTML = '<b></b><i></i>' + (c.cad ? '<u></u>' : ''); d.children[0].textContent = c.name; d.children[1].textContent = c.roman;
+      if (c.alt) { const sm = document.createElement('small'); sm.textContent = '②'; sm.title = c.alt; d.children[0].appendChild(sm); }
       if (c.cad) d.children[2].textContent = c.cad.split(' (')[0];
       d.style.left = (s.left - h.left + x * u) + 'px';
       d.style.top = (s.top - h.top + b.top * u - (c.cad ? 47 : 36)) + 'px';   // just above the top staff line

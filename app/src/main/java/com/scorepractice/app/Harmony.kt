@@ -14,6 +14,7 @@ object Harmony {
         var expl = ""           // what the chord does, in one or two sentences
         var cadence = ""        // 정격종지 / 반종지 / 거짓종지 / 변격종지
         var start = 0.0; var end = 0.0   // absolute time in quarters (file order)
+        var alt: Label? = null           // a second chord that fits these notes almost as well
         /** chord tones spelled as written: root letter + 3rd / 5th / 7th */
         fun tones(): List<Pair<Char, Int>> {
             val ri = "CDEFGAB".indexOf(rootStep); val nat = intArrayOf(0, 2, 4, 5, 7, 9, 11)
@@ -133,6 +134,7 @@ object Harmony {
                 val (w, total, bass) = window(b, e)
                 if (total > 0 && w.count { it > 0 } >= 2) {
                     var (best, br, bs) = bestOf(w, total, bass)
+                    val beatBest = Triple(best, br, bs)
                     if (mBest != null && mBest.first > 0.25 * mw.second) {
                         val keep = fit(w, total, bass, mBest.second, mBest.third)
                         // every note of this beat belongs to the measure's chord: it is that chord (broken chords, Alberti bass …)
@@ -141,23 +143,35 @@ object Harmony {
                         if (inside || keep >= 0.8 * best || best < 0.25 * total) { best = maxOf(keep, 0.26 * total); br = mBest.second; bs = mBest.third }
                     }
                     if (best > 0.25 * total) {
-                        // spell the root as written in the score when possible
-                        val sp = notes.filter { ((it.midi % 12) + 12) % 12 == br }.groupingBy { it.step to it.alter }.eachCount().maxByOrNull { it.value }?.key
-                        val rootName = if (sp != null) "${sp.first}${acc(sp.second)}" else {
-                            val flats = m.fifths < 0
-                            val nat = NAT.indexOf(br)
-                            if (nat >= 0) "${LETTERS[nat]}" else if (flats) "${LETTERS[NAT.indexOf(br + 1)]}♭" else "${LETTERS[NAT.indexOf(br - 1)]}♯"
+                        fun make(r: Int, sh: Shape, prefix: String): Label {
+                            // spell the root as written in the score when possible
+                            val sp = notes.filter { ((it.midi % 12) + 12) % 12 == r }.groupingBy { it.step to it.alter }.eachCount().maxByOrNull { it.value }?.key
+                            val rootName = if (sp != null) "${sp.first}${acc(sp.second)}" else {
+                                val flats = m.fifths < 0
+                                val nat = NAT.indexOf(r)
+                                if (nat >= 0) "${LETTERS[nat]}" else if (flats) "${LETTERS[NAT.indexOf((r + 1) % 12)]}♭" else "${LETTERS[NAT.indexOf((r + 11) % 12)]}♯"
+                            }
+                            val bpc = bass?.let { ((it.midi % 12) + 12) % 12 } ?: r
+                            val inv = sh.iv.indexOfFirst { (r + it) % 12 == bpc }.coerceAtLeast(0)
+                            val bassName = if (inv > 0 && bass != null) "/${bass.step}${acc(bass.alter)}" else ""
+                            return Label(mi, b, rootName + sh.suffix + bassName, prefix + roman(r, sh, tonic, m.minor, inv)).also { l ->
+                                l.rootPc = r; l.rootStep = sp?.first ?: rootName[0]; l.rootAlter = sp?.second ?: when { rootName.contains("♯") -> 1; rootName.contains("♭") -> -1; else -> 0 }
+                                l.iv = sh.iv; l.seventh = sh.seventh; l.quality = sh.suffix; l.inv = inv; l.tonic = tonic; l.minor = m.minor; l.keyName = kname
+                            }
                         }
-                        val bpc = bass?.let { ((it.midi % 12) + 12) % 12 } ?: br
-                        val inv = bs.iv.indexOfFirst { (br + it) % 12 == bpc }.coerceAtLeast(0)
-                        val bassName = if (inv > 0 && bass != null) "/${bass.step}${acc(bass.alter)}" else ""
-                        val name = rootName + bs.suffix + bassName
-                        val rn = roman(br, bs, tonic, m.minor, inv)
+                        val main = make(br, bs, if (kname != prevKey) "$kname: " else "")
+                        // second candidate: another root that fits nearly as well (or this beat's own reading when the measure's chord was kept)
+                        var second: Triple<Double, Int, Shape>? = null
+                        if (beatBest.second != br && beatBest.first > 0.25 * total) second = beatBest
+                        else {
+                            var sb = -1e9; var sr = 0; var ss = SHAPES[0]
+                            for (r in 0 until 12) if (r != br) for (sh in SHAPES) { val f = fit(w, total, bass, r, sh); if (f > sb) { sb = f; sr = r; ss = sh } }
+                            if (sb > 0.25 * total && sb >= best - 0.15 * total) second = Triple(sb, sr, ss)
+                        }
+                        if (second != null) main.alt = make(second.second, second.third, "")
                         val last = out.lastOrNull()
-                        if (last == null || last.name != name) out.add(Label(mi, b, name, (if (kname != prevKey) "$kname: " else "") + rn).also { l ->
-                            l.rootPc = br; l.rootStep = sp?.first ?: rootName[0]; l.rootAlter = sp?.second ?: when { rootName.contains("♯") -> 1; rootName.contains("♭") -> -1; else -> 0 }
-                            l.iv = bs.iv; l.seventh = bs.seventh; l.quality = bs.suffix; l.inv = inv; l.tonic = tonic; l.minor = m.minor; l.keyName = kname
-                        })
+                        if (last == null || last.name != main.name) out.add(main)
+                        else if (last.alt == null && main.alt != null) last.alt = main.alt
                         prevKey = kname
                     }
                 }
@@ -181,7 +195,8 @@ object Harmony {
         for ((i, l) in out.withIndex()) { l.start = mStart[l.measure] + l.beat; l.end = if (i + 1 < out.size) mStart[out[i + 1].measure] + out[i + 1].beat else mStart[sc.measures.size] }
         val invName = { l: Label -> if (l.seventh) listOf("기본형", "첫째 자리바꿈(65)", "둘째 자리바꿈(43)", "셋째 자리바꿈(42)")[l.inv.coerceIn(0, 3)]
             else listOf("기본형", "첫째 자리바꿈(6)", "둘째 자리바꿈(64)")[l.inv.coerceIn(0, 2)] }
-        for (l in out) {
+        for (l in out) l.alt?.let { a -> a.start = l.start; a.end = l.end }
+        for (l in out + out.mapNotNull { it.alt }) {
             val d = (l.rootPc - l.tonic + 12) % 12
             val q = triadQ(l.quality)
             val diat = (if (l.minor) MIN_Q else MAJ_Q)[d]

@@ -209,7 +209,7 @@ class XmlViewActivity : AppCompatActivity() {
             try {
                 labels = Harmony.analyse(sc)
                 for (l in labels) a.put(org.json.JSONObject().put("m", l.measure).put("beat", l.beat).put("name", l.name).put("roman", l.roman)
-                    .put("fn", l.fn).put("cad", l.cadence))
+                    .put("fn", l.fn).put("cad", l.cadence).put("alt", l.alt?.name ?: ""))
             } catch (e: Exception) {}
             return a.toString()
         }
@@ -393,6 +393,8 @@ class XmlViewActivity : AppCompatActivity() {
         card.addView(cTones); card.addView(cText)
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, 0) }
         fun b(t: String, on: () -> Unit) = Button(this).apply { text = t; isAllCaps = false; minWidth = 0; minimumWidth = 0; setOnClickListener { on() } }
+        altBtn = b("②") { showChord(cur, !showAlt) }.apply { setTextColor(Color.rgb(230, 81, 0)); visibility = View.GONE }
+        card.addView(altBtn, 1)
         row.addView(b("◀") { if (cur > 0) showChord(cur - 1) })
         row.addView(b("화음 듣기") { playChord(false) })
         row.addView(b("펼쳐 듣기") { playChord(true) })
@@ -413,9 +415,18 @@ class XmlViewActivity : AppCompatActivity() {
     private val FN_NAME = mapOf("T" to "으뜸 기능 (T)", "S" to "버금딸림 기능 (S)", "D" to "딸림 기능 (D)", "X" to "그 밖 (부속 등)")
     private val FN_COL = mapOf("T" to Color.rgb(63, 123, 224), "S" to Color.rgb(47, 163, 90), "D" to Color.rgb(224, 72, 72), "X" to Color.rgb(156, 106, 222))
 
-    private fun showChord(i: Int) {
-        val l = labels.getOrNull(i) ?: return
+    private var showAlt = false
+    private lateinit var altBtn: Button
+
+    private fun showChord(i: Int, alt: Boolean = false) {
+        val main0 = labels.getOrNull(i) ?: return
+        if (i != cur) showAlt = false
+        showAlt = alt && main0.alt != null
+        val l = if (showAlt) main0.alt!! else main0
         cur = i
+        // two readings of the same notes: say so, and let the other one be shown
+        altBtn.visibility = if (main0.alt != null) View.VISIBLE else View.GONE
+        altBtn.text = if (showAlt) "① ${main0.name}로 보기" else "② ${main0.alt?.name ?: ""}도 가능 · 보기"
         val key = Harmony.keyName(sc.measures[l.measure].fifths, l.minor).second.let { if (l.minor) "${it} 단조" else "$it 장조" }
         cTitle.text = "${l.name}  ·  ${l.roman.substringAfter(": ")}   (${label(l.measure)}마디, $key)"
         cFn.text = FN_NAME[l.fn]; cFn.setBackgroundColor(FN_COL[l.fn] ?: Color.GRAY)
@@ -441,7 +452,8 @@ class XmlViewActivity : AppCompatActivity() {
         sb.setSpan(android.text.style.RelativeSizeSpan(0.8f), st2, sb.length, 0)
         sb.setSpan(android.text.style.ForegroundColorSpan(Color.rgb(90, 90, 90)), st2, sb.length, 0)
         cTones.text = sb
-        cText.text = l.title + "\n" + l.expl + (if (l.cadence.isNotEmpty()) "\n▶ ${l.cadence}: 여기서 프레이즈가 한 단락 맺어집니다." else "") +
+        cText.text = (if (main0.alt != null) (if (showAlt) "두 번째 후보입니다 (첫 번째: ${main0.name}).\n" else "이 음들은 ${main0.alt!!.name}(${main0.alt!!.roman.substringAfter(": ")})로도 볼 수 있습니다.\n") else "") +
+            l.title + "\n" + l.expl + (if (l.cadence.isNotEmpty()) "\n▶ ${l.cadence}: 여기서 프레이즈가 한 단락 맺어집니다." else "") +
             "\n색 동그라미 = 화음 구성음 (${if (relColors()) "조의 으뜸음 = 빨강" else "도 = 빨강"} … 빨주노초파남보), 회색 점선 = 화음 밖의 음(경과음·보조음 등)"
         card.visibility = View.VISIBLE
         // the notes it covers: from this label to the next
@@ -467,7 +479,7 @@ class XmlViewActivity : AppCompatActivity() {
 
     /** the chord on its own: bass (root or the inverted bass) + the chord tones around middle C */
     private fun playChord(spread: Boolean) {
-        val l = labels.getOrNull(cur) ?: return
+        val l = labels.getOrNull(cur)?.let { if (showAlt) it.alt ?: it else it } ?: return
         stop()
         val pcs = l.iv.map { (l.rootPc + it) % 12 }
         val bassPc = pcs[l.inv.coerceIn(0, pcs.size - 1)]
