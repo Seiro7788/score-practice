@@ -413,9 +413,29 @@ class XmlViewActivity : AppCompatActivity() {
         cTitle.text = "${l.name}  ·  ${l.roman.substringAfter(": ")}   (${label(l.measure)}마디, $key)"
         cFn.text = FN_NAME[l.fn]; cFn.setBackgroundColor(FN_COL[l.fn] ?: Color.GRAY)
         val tones = l.tones()
-        cTones.text = "구성음: " + tones.mapIndexed { k, t -> Harmony.solfa(t) + when (k) { 0 -> "(근음)"; 1 -> "(3음)"; 2 -> "(5음)"; else -> "(7음)" } }.joinToString("  ")
+        // 도 – 장3도 – 미 – 단3도 – 솔 …, each note in its rainbow colour
+        val sb = android.text.SpannableStringBuilder()
+        tones.forEachIndexed { k, t ->
+            if (k > 0) {
+                val iv = " – " + Harmony.interval(tones[k - 1], t) + " – "
+                val st = sb.length; sb.append(iv)
+                sb.setSpan(android.text.style.ForegroundColorSpan(Color.rgb(110, 110, 110)), st, sb.length, 0)
+                sb.setSpan(android.text.style.RelativeSizeSpan(0.8f), st, sb.length, 0)
+            }
+            val st = sb.length; sb.append(Harmony.solfa(t))
+            sb.setSpan(android.text.style.ForegroundColorSpan(Harmony.RAINBOW[Harmony.pcOf(t)]), st, sb.length, 0)
+            sb.setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), st, sb.length, 0)
+        }
+        val roles = listOf("근음", "3음", "5음", "7음")
+        sb.append("\n"); val st2 = sb.length
+        sb.append(tones.mapIndexed { k, t -> "${roles[k]} ${Harmony.solfa(t)}" }.joinToString(" · ") +
+            (if (tones.size > 1) "  ·  근음–5음 " + Harmony.interval(tones[0], tones[2.coerceAtMost(tones.size - 1)]) else "") +
+            (if (tones.size > 3) ", 근음–7음 " + Harmony.interval(tones[0], tones[3]).replace("8도", "8도") else ""))
+        sb.setSpan(android.text.style.RelativeSizeSpan(0.8f), st2, sb.length, 0)
+        sb.setSpan(android.text.style.ForegroundColorSpan(Color.rgb(90, 90, 90)), st2, sb.length, 0)
+        cTones.text = sb
         cText.text = l.title + "\n" + l.expl + (if (l.cadence.isNotEmpty()) "\n▶ ${l.cadence}: 여기서 프레이즈가 한 단락 맺어집니다." else "") +
-            "\n초록 동그라미 = 화음 구성음, 회색 점선 = 화음 밖의 음(경과음·보조음 등)"
+            "\n색 동그라미 = 화음 구성음(도 빨강 … 시 보라), 회색 점선 = 화음 밖의 음(경과음·보조음 등)"
         card.visibility = View.VISIBLE
         // the notes it covers: from this label to the next
         val spans = org.json.JSONArray()

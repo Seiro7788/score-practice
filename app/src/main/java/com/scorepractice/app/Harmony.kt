@@ -28,6 +28,26 @@ object Harmony {
     private val SOLFA = mapOf('C' to "도", 'D' to "레", 'E' to "미", 'F' to "파", 'G' to "솔", 'A' to "라", 'B' to "시")
     fun solfa(p: Pair<Char, Int>) = SOLFA[p.first] + acc(p.second)
 
+    /** 도 빨강 … 시 보라 (빨주노초파남보), 반음은 그 사이 색 — same as the rings on the score */
+    val RAINBOW = intArrayOf(0xFFE53935.toInt(), 0xFFF06A2A.toInt(), 0xFFFB8C00.toInt(), 0xFFF9B81A.toInt(), 0xFFF2C200.toInt(), 0xFF43A047.toInt(),
+        0xFF1AA39A.toInt(), 0xFF1E88E5.toInt(), 0xFF3557C4.toInt(), 0xFF283593.toInt(), 0xFF5E35B1.toInt(), 0xFF8E24AA.toInt())
+    private val NATPC = mapOf('C' to 0, 'D' to 2, 'E' to 4, 'F' to 5, 'G' to 7, 'A' to 9, 'B' to 11)
+    fun pcOf(p: Pair<Char, Int>) = ((NATPC[p.first] ?: 0) + p.second + 12) % 12
+
+    /** interval between two spelled notes going up: 장3도, 단3도, 완전5도 … */
+    fun interval(a: Pair<Char, Int>, b: Pair<Char, Int>): String {
+        val L = "CDEFGAB"
+        val steps = (L.indexOf(b.first) - L.indexOf(a.first) + 7) % 7
+        val semis = (pcOf(b) - pcOf(a) + 12) % 12
+        val num = steps + 1
+        val perfect = num == 1 || num == 4 || num == 5 || num == 8
+        val base = intArrayOf(0, 2, 4, 5, 7, 9, 11)[steps]     // major / perfect size
+        val diff = semis - base
+        val q = if (perfect) when (diff) { 0 -> "완전"; 1 -> "증"; -1 -> "감"; else -> "?" }
+                else when (diff) { 0 -> "장"; -1 -> "단"; 1 -> "증"; -2 -> "감"; else -> "?" }
+        return "$q${num}도"
+    }
+
     private class Shape(val iv: IntArray, val suffix: String, val upper: Boolean, val romanSuffix: String, val seventh: Boolean)
     private val SHAPES = listOf(
         Shape(intArrayOf(0, 4, 7), "", true, "", false),

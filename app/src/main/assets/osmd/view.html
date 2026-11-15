@@ -122,6 +122,8 @@
   function selChord(i) { document.querySelectorAll('.ch').forEach(e => e.classList.toggle('sel', (e.dataset.i | 0) === i)); }
 
   // the chord being studied: its notes ringed green (chord tones) or grey (notes outside the chord)
+  // 도 빨강, 레 주황, 미 노랑, 파 초록, 솔 파랑, 라 남색, 시 보라; 반음은 두 색 사이
+  const RAINBOW = ['#e53935', '#f06a2a', '#fb8c00', '#f9b81a', '#f2c200', '#43a047', '#1aa39a', '#1e88e5', '#3557c4', '#283593', '#5e35b1', '#8e24aa'];
   let chordMark = null;
   function markChord(spans, pcs) {
     chordMark = spans && spans.length ? [spans, pcs] : null;
@@ -141,8 +143,9 @@
           const c = document.createElementNS(ns, 'ellipse');
           c.setAttribute('cx', ((a.x + 0.6) * 10).toFixed(1)); c.setAttribute('cy', (a.y * 10).toFixed(1));
           c.setAttribute('rx', 10); c.setAttribute('ry', 8); c.setAttribute('class', 'chm');
-          c.setAttribute('fill', inC ? 'rgba(46,160,90,.28)' : 'none');
-          c.setAttribute('stroke', inC ? '#2e9e5a' : '#9e9e9e'); c.setAttribute('stroke-width', inC ? 2.4 : 1.6);
+          const pc = ((g.sourceNote.halfTone % 12) + 12) % 12, col = RAINBOW[pc];
+          c.setAttribute('fill', inC ? col : 'none'); c.setAttribute('fill-opacity', inC ? 0.25 : 0);
+          c.setAttribute('stroke', inC ? col : '#9e9e9e'); c.setAttribute('stroke-width', inC ? 2.6 : 1.6);
           if (!inC) c.setAttribute('stroke-dasharray', '3 2');
           svg.appendChild(c);
           if (!first) first = a;
