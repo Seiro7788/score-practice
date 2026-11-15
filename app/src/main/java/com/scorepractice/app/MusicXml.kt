@@ -7,7 +7,12 @@ import java.io.InputStream
 import java.util.zip.ZipInputStream
 
 /** a note from the MusicXML, times in quarter notes from the start of its measure */
-class XNote(val measure: Int, val onset: Double, var dur: Double, val midi: Int, val step: Char, val alter: Int, var hand: Int, val part: Int = 0, val staff: Int = 1, val accent: Int = 0)
+class XNote(val measure: Int, val onset: Double, var dur: Double, val midi: Int, val step: Char, val alter: Int, var hand: Int, val part: Int = 0, val staff: Int = 1, val accent: Int = 0) {
+    var graces: List<Int> = emptyList()   // grace notes played just before this note (MIDI)
+    var orn: String? = null               // trill-mark, mordent, inverted-mordent, turn, inverted-turn
+    var ornAlter: Int? = null             // accidental written with the ornament (for the helper note)
+    var trem = 0                          // single-note tremolo strokes (1 = eighths, 2 = sixteenths …)
+}
 
 /** one measure (index in file order) */
 class XMeasure(val number: String, var length: Double = 0.0, var forward: Boolean = false, var backward: Boolean = false,
@@ -97,6 +102,8 @@ object MusicXml {
         var inNote = false; var isChord = false; var isRest = false; var isGrace = false
         var step = 'C'; var alter = 0; var octave = 4; var dur = 0.0; var staff = 1; var tieStop = false; var tieStart = false
         var inBackup = false; var inForward = false; var text = StringBuilder()
+        var noteOrn: String? = null; var ornAlter: Int? = null; var inOrn = false; var tremN = 0; var tremSingle = true
+        val pendingGrace = mutableMapOf<Int, MutableList<Int>>()   // part*16+staff -> grace notes waiting for their main note
         val openTies = mutableMapOf<Int, XNote>()   // midi -> note waiting for its tie
         var ev = p.eventType
         while (ev != XmlPullParser.END_DOCUMENT) {
@@ -110,10 +117,13 @@ object MusicXml {
                             if (part == 0) measures.add(XMeasure(p.getAttributeValue(null, "number") ?: "${mi + 1}", fifths = fifths,
                                 minor = minorMode, beats = tBeats, beatType = tType))
                         }
-                        "note" -> { noteAccent = 0; inNote = true; isChord = false; isRest = false; isGrace = false; alter = 0; dur = 0.0; staff = 1; tieStop = false; tieStart = false }
+                        "note" -> { noteOrn = null; ornAlter = null; tremN = 0; noteAccent = 0; inNote = true; isChord = false; isRest = false; isGrace = false; alter = 0; dur = 0.0; staff = 1; tieStop = false; tieStart = false }
                         "chord" -> if (inNote) isChord = true
                         "rest" -> if (inNote) isRest = true
                         "grace" -> if (inNote) isGrace = true
+                        "ornaments" -> if (inNote) inOrn = true
+                        "trill-mark", "mordent", "inverted-mordent", "turn", "inverted-turn", "delayed-turn" -> if (inNote && noteOrn == null) noteOrn = if (p.name == "delayed-turn") "turn" else p.name
+                        "tremolo" -> if (inNote) tremSingle = (p.getAttributeValue(null, "type") ?: "single") == "single"
                         "tie" -> if (inNote) { val t = p.getAttributeValue(null, "type"); if (t == "stop") tieStop = true; if (t == "start") tieStart = true }
                         "backup" -> inBackup = true
                         "direction" -> { inDir = true; dirOffset = 0.0; dirLevel = null; dirWedge = null; dirAccent = false }
@@ -162,6 +172,9 @@ object MusicXml {
                             }
                         }
                         "backup" -> inBackup = false
+                        "ornaments" -> inOrn = false
+                        "accidental-mark" -> if (inNote && inOrn) ornAlter = when (t) { "sharp" -> 1; "flat" -> -1; "natural" -> 0; "double-sharp" -> 2; "flat-flat" -> -2; else -> ornAlter }
+                        "tremolo" -> if (inNote && tremSingle) tremN = t.toIntOrNull() ?: 0
                         "offset" -> if (inDir) dirOffset = (t.toDoubleOrNull() ?: 0.0) / divisions
                         "other-dynamics" -> if (inDir && Regex("s?f+z|sf|rf").containsMatchIn(t)) dirAccent = true
                         "direction" -> {
@@ -171,6 +184,8 @@ object MusicXml {
                         "forward" -> inForward = false
                         "note" -> {
                             inNote = false
+                            val gkey = part * 16 + staff
+                            if (isGrace && !isRest) pendingGrace.getOrPut(gkey) { mutableListOf() }.add(12 * (octave + 1) + (STEP_PC[step] ?: 0) + alter)
                             if (!isGrace) {
                                 val start = if (isChord) lastStart else pos
                                 if (!isChord) { lastStart = pos; pos += dur; maxPos = maxOf(maxPos, pos) }
@@ -181,6 +196,8 @@ object MusicXml {
                                     if (tieStop && prev != null) { prev.dur += dur; if (!tieStart) openTies.remove(midi) }
                                     else {
                                         val n = XNote(mi, start, dur, midi, step, alter, hand, part, staff, noteAccent); notes.add(n)
+                                        n.orn = noteOrn; n.ornAlter = ornAlter; n.trem = tremN
+                                        if (!isChord) pendingGrace.remove(gkey)?.let { n.graces = it }
                                         if (tieStart) openTies[midi] = n
                                     }
                                 }

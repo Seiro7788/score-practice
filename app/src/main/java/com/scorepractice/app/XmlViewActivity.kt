@@ -232,7 +232,7 @@ class XmlViewActivity : AppCompatActivity() {
                 val tl = Timeline.build(sc, ch, bpm)
                 if (tl.isEmpty()) "이 범위에 재생할 음표가 없습니다" else {
                     val files = mutableListOf<File>()
-                    if (sound != 1) { val f = File(cacheDir, "xplay.mid"); MidiPlayer.write(tl, f); files.add(f) }
+                    if (sound != 1) { val f = File(cacheDir, "xplay.mid"); MidiPlayer.write(Timeline.build(sc, ch, bpm, ornaments = true), f); files.add(f) }
                     if (sound != 0) { val f = File(cacheDir, "xsing.wav"); if (Singer.render(this, Timeline.melody(tl), f, score.composer)) files.add(f) }
                     times = Timeline.measureTimes(sc, ch, bpm)
                     main.post {

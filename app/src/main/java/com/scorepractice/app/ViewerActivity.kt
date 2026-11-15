@@ -601,7 +601,7 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                     val tl = Timeline.build(sc, ch, bpm)
                     if (tl.isEmpty()) "재생할 음표가 없습니다" else {
                         val files = mutableListOf<File>()
-                        if (sound != 1) { val f = File(cacheDir, "play.mid"); MidiPlayer.write(tl, f); files.add(f) }
+                        if (sound != 1) { val f = File(cacheDir, "play.mid"); MidiPlayer.write(Timeline.build(sc, ch, bpm, ornaments = true), f); files.add(f) }
                         if (sound != 0) {
                             val f = File(cacheDir, "sing.wav")
                             if (Singer.render(this, Timeline.melody(tl), f, score.composer)) files.add(f)
