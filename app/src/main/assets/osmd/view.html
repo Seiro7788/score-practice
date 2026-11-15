@@ -98,9 +98,9 @@
       }
       const d = document.createElement('div'); d.className = 'ch'; d.dataset.i = idx;
       d.innerHTML = '<b></b><i></i>' + (c.cad ? '<u></u>' : ''); d.children[0].textContent = c.name; d.children[1].textContent = c.roman;
-      if (c.cad) d.children[2].textContent = c.cad;
+      if (c.cad) d.children[2].textContent = c.cad.split(' (')[0];
       d.style.left = (s.left - h.left + x * u) + 'px';
-      d.style.top = (s.top - h.top + b.top * u - 36) + 'px';   // just above the top staff line
+      d.style.top = (s.top - h.top + b.top * u - (c.cad ? 47 : 36)) + 'px';   // just above the top staff line
       d.addEventListener('click', e => { e.stopPropagation(); if (window.Android && Android.chordTap) Android.chordTap(idx); });
       host.appendChild(d);
       placed.push({ x, top: b.top, fn: c.fn || 'X', m: c.m });
