@@ -96,28 +96,49 @@ object Harmony {
             val beatLen = if (m.beatType == 8 && m.beats % 3 == 0 && m.beats > 3) 1.5 else 4.0 / m.beatType
             val len = if (m.length > 0) m.length else m.beats * 4.0 / m.beatType
             val (tonic, kname) = keyName(m.fifths, m.minor)
+            // weights of each pitch class in a time window, and its lowest note
+            fun window(a: Double, z: Double): Triple<DoubleArray, Double, XNote?> {
+                val w = DoubleArray(12); var bass: XNote? = null; var total = 0.0
+                for (n in notes) {
+                    val s0 = maxOf(n.onset, a); val t = minOf(n.onset + n.dur, z)
+                    if (t <= s0) continue
+                    val pc = ((n.midi % 12) + 12) % 12
+                    w[pc] += t - s0; total += t - s0
+                    if (bass == null || n.midi < bass.midi) bass = n
+                }
+                return Triple(w, total, bass)
+            }
+            fun fit(w: DoubleArray, total: Double, bass: XNote?, r: Int, sh: Shape): Double {
+                val inS = BooleanArray(12); for (iv in sh.iv) inS[(r + iv) % 12] = true
+                var sc0 = 0.0
+                for (pc in 0 until 12) sc0 += if (inS[pc]) w[pc] else -0.7 * w[pc]
+                if (w[(r + sh.iv[1]) % 12] == 0.0) return -1e9                       // no third: not this chord (octaves, open fifths)
+                if (w[r] == 0.0) sc0 -= 0.25 * total                                  // no root
+                if (bass != null && (bass.midi % 12 + 12) % 12 == r) sc0 += 0.2 * total
+                if (sh.seventh) sc0 -= 0.12 * total                                   // prefer the plain triad
+                return sc0
+            }
+            fun bestOf(w: DoubleArray, total: Double, bass: XNote?): Triple<Double, Int, Shape> {
+                var best = -1e9; var br = 0; var bs = SHAPES[0]
+                for (r in 0 until 12) for (sh in SHAPES) { val f = fit(w, total, bass, r, sh); if (f > best) { best = f; br = r; bs = sh } }
+                return Triple(best, br, bs)
+            }
+            // the chord of the whole measure: a beat that it explains nearly as well keeps it
+            // (e.g. 솔 over 미–도 is C, not Em, even if one beat alone has only 미 and 솔)
+            val mw = window(0.0, len)
+            val mBest = if (mw.second > 0) bestOf(mw.first, mw.second, mw.third) else null
             var b = 0.0
             while (b < len - 1e-6) {
                 val e = b + beatLen
-                val w = DoubleArray(12); var bass: XNote? = null; var total = 0.0
-                for (n in notes) {
-                    val s = maxOf(n.onset, b); val t = minOf(n.onset + n.dur, e)
-                    if (t <= s) continue
-                    val pc = ((n.midi % 12) + 12) % 12
-                    w[pc] += t - s; total += t - s
-                    if (bass == null || n.midi < bass.midi) bass = n
-                }
+                val (w, total, bass) = window(b, e)
                 if (total > 0 && w.count { it > 0 } >= 2) {
-                    var best = -1e9; var br = 0; var bs = SHAPES[0]
-                    for (r in 0 until 12) for (sh in SHAPES) {
-                        val inS = BooleanArray(12); for (iv in sh.iv) inS[(r + iv) % 12] = true
-                        var sc0 = 0.0
-                        for (pc in 0 until 12) sc0 += if (inS[pc]) w[pc] else -0.7 * w[pc]
-                        if (w[(r + sh.iv[1]) % 12] == 0.0) continue                     // no third: not this chord (octaves, open fifths)
-                        if (w[r] == 0.0) sc0 -= 0.25 * total                              // no root
-                        if (bass != null && (bass.midi % 12 + 12) % 12 == r) sc0 += 0.2 * total
-                        if (sh.seventh) sc0 -= 0.12 * total                               // prefer the plain triad
-                        if (sc0 > best) { best = sc0; br = r; bs = sh }
+                    var (best, br, bs) = bestOf(w, total, bass)
+                    if (mBest != null && mBest.first > 0.25 * mw.second) {
+                        val keep = fit(w, total, bass, mBest.second, mBest.third)
+                        // every note of this beat belongs to the measure's chord: it is that chord (broken chords, Alberti bass …)
+                        val tonesM = mBest.third.iv.map { (mBest.second + it) % 12 }.toSet()
+                        val inside = (0 until 12).all { w[it] == 0.0 || it in tonesM }
+                        if (inside || keep >= 0.8 * best || best < 0.25 * total) { best = maxOf(keep, 0.26 * total); br = mBest.second; bs = mBest.third }
                     }
                     if (best > 0.25 * total) {
                         // spell the root as written in the score when possible
