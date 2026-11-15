@@ -125,8 +125,10 @@
   // 도 빨강, 레 주황, 미 노랑, 파 초록, 솔 파랑, 라 남색, 시 보라; 반음은 두 색 사이
   const RAINBOW = ['#e53935', '#f06a2a', '#fb8c00', '#f9b81a', '#f2c200', '#43a047', '#1aa39a', '#1e88e5', '#3557c4', '#283593', '#5e35b1', '#8e24aa'];
   let chordMark = null;
-  function markChord(spans, pcs) {
-    chordMark = spans && spans.length ? [spans, pcs] : null;
+  // shift = tonic pitch class when colours follow the key (상대음), 0 when they follow the pitch (절대음)
+  function markChord(spans, pcs, shift) {
+    shift = shift || 0;
+    chordMark = spans && spans.length ? [spans, pcs, shift] : null;
     document.querySelectorAll('.chm').forEach(e => e.remove());
     if (!spans || !spans.length) { selChord(-1); return; }
     const svg = svgEl(), ns = 'http://www.w3.org/2000/svg', ml = osmd.GraphicSheet.MeasureList;
@@ -143,7 +145,7 @@
           const c = document.createElementNS(ns, 'ellipse');
           c.setAttribute('cx', ((a.x + 0.6) * 10).toFixed(1)); c.setAttribute('cy', (a.y * 10).toFixed(1));
           c.setAttribute('rx', 10); c.setAttribute('ry', 8); c.setAttribute('class', 'chm');
-          const pc = ((g.sourceNote.halfTone % 12) + 12) % 12, col = RAINBOW[pc];
+          const pc = ((g.sourceNote.halfTone % 12) + 12) % 12, col = RAINBOW[(pc - shift + 12) % 12];
           c.setAttribute('fill', inC ? col : 'none'); c.setAttribute('fill-opacity', inC ? 0.25 : 0);
           c.setAttribute('stroke', inC ? col : '#9e9e9e'); c.setAttribute('stroke-width', inC ? 2.6 : 1.6);
           if (!inC) c.setAttribute('stroke-dasharray', '3 2');
@@ -184,7 +186,7 @@
   function setZoom(z) {
     osmd.zoom = z; applyRange(); osmd.render(); collect();
     drawChords(chordList); drawDyn(dynList); drawMelody(melodyOn); nidx = null; drawFingers();
-    if (chordMark) { markChord(chordMark[0], chordMark[1]); }
+    if (chordMark) { markChord(chordMark[0], chordMark[1], chordMark[2]); }
     for (const k of Object.keys(markIdx)) mark(k, markIdx[k]);
     if (window.Android) Android.onSection(range[0], range[1]);
   }

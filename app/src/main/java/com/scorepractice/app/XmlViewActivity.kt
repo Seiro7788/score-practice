@@ -398,6 +398,13 @@ class XmlViewActivity : AppCompatActivity() {
         row.addView(b("펼쳐 듣기") { playChord(true) })
         row.addView(b("▶") { if (cur + 1 < labels.size) showChord(cur + 1) })
         row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        // colours by pitch (도 = 빨강 always) or by the key (the key's 도 = 빨강); names stay 도레미 as written
+        colBtn = b(if (relColors()) "색: 상대음(조)" else "색: 절대음") {
+            prefs.edit().putBoolean("chordRel", !relColors()).apply()
+            if (cur >= 0) showChord(cur)
+            toast(if (relColors()) "상대음: 그 조의 으뜸음이 빨강(도 색)입니다. 이름은 그대로 도레미" else "절대음: 도는 항상 빨강, 레 주황 …")
+        }
+        row.addView(colBtn)
         row.addView(b("닫기") { closeChord() })
         card.addView(row)
         return card
@@ -423,7 +430,7 @@ class XmlViewActivity : AppCompatActivity() {
                 sb.setSpan(android.text.style.RelativeSizeSpan(0.8f), st, sb.length, 0)
             }
             val st = sb.length; sb.append(Harmony.solfa(t))
-            sb.setSpan(android.text.style.ForegroundColorSpan(Harmony.RAINBOW[Harmony.pcOf(t)]), st, sb.length, 0)
+            sb.setSpan(android.text.style.ForegroundColorSpan(Harmony.RAINBOW[(Harmony.pcOf(t) - colShift(l) + 12) % 12]), st, sb.length, 0)
             sb.setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), st, sb.length, 0)
         }
         val roles = listOf("근음", "3음", "5음", "7음")
@@ -435,7 +442,7 @@ class XmlViewActivity : AppCompatActivity() {
         sb.setSpan(android.text.style.ForegroundColorSpan(Color.rgb(90, 90, 90)), st2, sb.length, 0)
         cTones.text = sb
         cText.text = l.title + "\n" + l.expl + (if (l.cadence.isNotEmpty()) "\n▶ ${l.cadence}: 여기서 프레이즈가 한 단락 맺어집니다." else "") +
-            "\n색 동그라미 = 화음 구성음(도 빨강 … 시 보라), 회색 점선 = 화음 밖의 음(경과음·보조음 등)"
+            "\n색 동그라미 = 화음 구성음 (${if (relColors()) "조의 으뜸음 = 빨강" else "도 = 빨강"} … 빨주노초파남보), 회색 점선 = 화음 밖의 음(경과음·보조음 등)"
         card.visibility = View.VISIBLE
         // the notes it covers: from this label to the next
         val spans = org.json.JSONArray()
@@ -447,9 +454,14 @@ class XmlViewActivity : AppCompatActivity() {
             mStart += len; t = mStart; mi++
         }
         val pcs = org.json.JSONArray(); l.iv.forEach { pcs.put((l.rootPc + it) % 12) }
-        js("markChord($spans, $pcs); selChord($i)")
+        js("markChord($spans, $pcs, ${colShift(l)}); selChord($i)")
+        colBtn.text = if (relColors()) "색: 상대음(조)" else "색: 절대음"
         if (curA >= 0 && (l.measure < curA || l.measure > curB)) secs.firstOrNull { l.measure in it.first..it.second }?.let { showSection(it.first, it.second) }
     }
+
+    private lateinit var colBtn: Button
+    private fun relColors() = prefs.getBoolean("chordRel", false)
+    private fun colShift(l: Harmony.Label) = if (relColors()) l.tonic else 0
 
     private fun closeChord() { card.visibility = View.GONE; cur = -1; js("markChord([], [])") }
 
