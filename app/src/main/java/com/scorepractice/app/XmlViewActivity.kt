@@ -240,6 +240,8 @@ class XmlViewActivity : AppCompatActivity() {
                         stopPlayers()
                         for (f in files) players.add(MidiPlayer.player(this, f, loop).apply { setOnCompletionListener { if (!loop) stop() } })
                         players.reversed().forEach { it.start() }   // voice first, piano right after
+                        together?.alive = false
+                        if (players.size == 2) together = Together(main, players[0], players[1]).also { main.postDelayed(it, 300) }
                         status.text = "${label(a)}~${if (b < 0) "끝" else label(b)}마디 재생 중 · 아무 곳이나 누르면 멈춤"
                         follow()
                     }
@@ -272,8 +274,10 @@ class XmlViewActivity : AppCompatActivity() {
 
     private fun follow() { lastMark = -1; main.removeCallbacks(follower); main.post(follower) }
 
+    private var together: Together? = null
+
     private fun stopPlayers() {
-        main.removeCallbacks(follower)
+        main.removeCallbacks(follower); together?.alive = false; together = null
         for (p in players) try { p.stop(); p.release() } catch (_: Exception) {}
         players.clear()
     }

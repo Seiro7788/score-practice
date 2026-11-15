@@ -107,6 +107,29 @@ object Timeline {
     }
 }
 
+/**
+ * Keeps the singing voice on the piano's time. The two players start a moment apart (the built-in synthesizer
+ * needs a while to start) and, when looping, have slightly different lengths; every quarter second the voice
+ * is moved back onto the piano's position if it is off by more than a few hundredths of a second.
+ */
+class Together(private val h: android.os.Handler, private val piano: android.media.MediaPlayer, private val voice: android.media.MediaPlayer) : Runnable {
+    @Volatile var alive = true
+    override fun run() {
+        if (!alive) return
+        try {
+            if (piano.isPlaying) {
+                val d = voice.currentPosition - piano.currentPosition
+                if (kotlin.math.abs(d) > 70) {
+                    if (android.os.Build.VERSION.SDK_INT >= 26) voice.seekTo(piano.currentPosition.toLong() + 25, android.media.MediaPlayer.SEEK_CLOSEST)
+                    else voice.seekTo(piano.currentPosition + 25)
+                }
+                if (!voice.isPlaying) voice.start()
+            }
+        } catch (_: Exception) { return }
+        h.postDelayed(this, 250)
+    }
+}
+
 /** writes a standard MIDI file (piano) and plays it with the phone's built-in synthesizer */
 object MidiPlayer {
     private fun vlq(o: ByteArrayOutputStream, v0: Int) {

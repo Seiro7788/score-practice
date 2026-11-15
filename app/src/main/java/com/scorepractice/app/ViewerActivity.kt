@@ -612,6 +612,8 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
                                 setOnCompletionListener { if (!ch.loop) { stopPlay(); play.text = "▶ 재생" } }
                             })
                             players.reversed().forEach { it.start() }   // voice first, piano right after
+                        together?.alive = false
+                        if (players.size == 2) together = Together(main, players[0], players[1]).also { main.postDelayed(it, 300) }
                         }
                         null
                     }
@@ -625,7 +627,10 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
             text = "  계이름: 도=C 고정, 휴대폰의 한국어 음성으로 부릅니다 (첫 재생은 준비에 몇 초 걸림)"; textSize = 11f; alpha = 0.7f })
     }
 
+    private var together: Together? = null
+
     private fun stopPlay() {
+        together?.alive = false; together = null
         for (p in players) try { p.stop(); p.release() } catch (_: Exception) {}
         players.clear()
     }
