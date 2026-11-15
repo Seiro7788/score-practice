@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -83,6 +84,7 @@ class XmlViewActivity : AppCompatActivity() {
         web.addJavascriptInterface(Bridge(xmlText = MusicXml.text(f)), "Android")
         web.loadUrl("file:///android_asset/osmd/view.html")
         root.addView(web, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(buildChordCard())
 
         // controls
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), dp(2), dp(4), dp(2)); setBackgroundColor(Color.rgb(243, 238, 248)) }
@@ -105,6 +107,10 @@ class XmlViewActivity : AppCompatActivity() {
         bar.addView(CheckBox(this).apply {
             text = "코드"; isChecked = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("xmlChords", true)
             setOnCheckedChangeListener { _, v -> getSharedPreferences("settings", MODE_PRIVATE).edit().putBoolean("xmlChords", v).apply(); js("toggleChords($v)") }
+        })
+        bar.addView(CheckBox(this).apply {
+            text = "기능"; isChecked = prefs.getBoolean("xmlFn", true)
+            setOnCheckedChangeListener { _, v -> prefs.edit().putBoolean("xmlFn", v).apply(); js("toggleFn($v)") }
         })
         fingerBtn = small("손번호") { setFingerMode(!fingerMode) }
         bar.addView(fingerBtn)
@@ -195,11 +201,15 @@ class XmlViewActivity : AppCompatActivity() {
         @JavascriptInterface fun fingerSet(m: Int, t: Double, k: Int, n: Int) { main.post { setFinger(m, t, k, n) } }
         @JavascriptInterface fun fingerExit() { main.post { setFingerMode(false) } }
         @JavascriptInterface fun showColors(): Boolean = prefs.getBoolean("xmlColors", true)
+        @JavascriptInterface fun showFn(): Boolean = prefs.getBoolean("xmlFn", true)
+        @JavascriptInterface fun chordTap(i: Int) { main.post { showChord(i) } }
         @JavascriptInterface fun showChords(): Boolean = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("xmlChords", true)
         @JavascriptInterface fun chords(): String {
             val a = org.json.JSONArray()
             try {
-                for (l in Harmony.analyse(sc)) a.put(org.json.JSONObject().put("m", l.measure).put("beat", l.beat).put("name", l.name).put("roman", l.roman))
+                labels = Harmony.analyse(sc)
+                for (l in labels) a.put(org.json.JSONObject().put("m", l.measure).put("beat", l.beat).put("name", l.name).put("roman", l.roman)
+                    .put("fn", l.fn).put("cad", l.cadence))
             } catch (e: Exception) {}
             return a.toString()
         }
@@ -363,6 +373,79 @@ class XmlViewActivity : AppCompatActivity() {
                 val a = idxOf(ea.text.toString(), a0); val b = idxOf(eb.text.toString(), b0)
                 showSection(minOf(a, b), maxOf(a, b))
             }.show()
+    }
+
+    // ---------------------------------------------------------------- studying one chord
+    @Volatile private var labels: List<Harmony.Label> = emptyList()
+    private lateinit var card: LinearLayout
+    private lateinit var cTitle: TextView; private lateinit var cTones: TextView; private lateinit var cFn: TextView; private lateinit var cText: TextView
+    private var cur = -1
+
+    private fun buildChordCard(): View {
+        card = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(8), dp(12), dp(6)); setBackgroundColor(Color.rgb(255, 250, 238)); visibility = View.GONE }
+        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        cTitle = TextView(this).apply { textSize = 17f; setTypeface(typeface, android.graphics.Typeface.BOLD); setTextColor(Color.rgb(40, 40, 60)) }
+        cFn = TextView(this).apply { textSize = 13f; setTextColor(Color.WHITE); setPadding(dp(8), dp(2), dp(8), dp(2)) }
+        top.addView(cTitle, LinearLayout.LayoutParams(0, -2, 1f)); top.addView(cFn)
+        card.addView(top)
+        cTones = TextView(this).apply { textSize = 15f; setTextColor(Color.rgb(46, 120, 70)); setPadding(0, dp(4), 0, dp(2)) }
+        cText = TextView(this).apply { textSize = 14f; setTextColor(Color.rgb(60, 60, 60)); setLineSpacing(0f, 1.15f) }
+        card.addView(cTones); card.addView(cText)
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, 0) }
+        fun b(t: String, on: () -> Unit) = Button(this).apply { text = t; isAllCaps = false; minWidth = 0; minimumWidth = 0; setOnClickListener { on() } }
+        row.addView(b("◀") { if (cur > 0) showChord(cur - 1) })
+        row.addView(b("화음 듣기") { playChord(false) })
+        row.addView(b("펼쳐 듣기") { playChord(true) })
+        row.addView(b("▶") { if (cur + 1 < labels.size) showChord(cur + 1) })
+        row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        row.addView(b("닫기") { closeChord() })
+        card.addView(row)
+        return card
+    }
+
+    private val FN_NAME = mapOf("T" to "으뜸 기능 (T)", "S" to "버금딸림 기능 (S)", "D" to "딸림 기능 (D)", "X" to "그 밖 (부속 등)")
+    private val FN_COL = mapOf("T" to Color.rgb(63, 123, 224), "S" to Color.rgb(47, 163, 90), "D" to Color.rgb(224, 72, 72), "X" to Color.rgb(156, 106, 222))
+
+    private fun showChord(i: Int) {
+        val l = labels.getOrNull(i) ?: return
+        cur = i
+        val key = Harmony.keyName(sc.measures[l.measure].fifths, l.minor).second.let { if (l.minor) "${it} 단조" else "$it 장조" }
+        cTitle.text = "${l.name}  ·  ${l.roman.substringAfter(": ")}   (${label(l.measure)}마디, $key)"
+        cFn.text = FN_NAME[l.fn]; cFn.setBackgroundColor(FN_COL[l.fn] ?: Color.GRAY)
+        val tones = l.tones()
+        cTones.text = "구성음: " + tones.mapIndexed { k, t -> Harmony.solfa(t) + when (k) { 0 -> "(근음)"; 1 -> "(3음)"; 2 -> "(5음)"; else -> "(7음)" } }.joinToString("  ")
+        cText.text = l.title + "\n" + l.expl + (if (l.cadence.isNotEmpty()) "\n▶ ${l.cadence}: 여기서 프레이즈가 한 단락 맺어집니다." else "") +
+            "\n초록 동그라미 = 화음 구성음, 회색 점선 = 화음 밖의 음(경과음·보조음 등)"
+        card.visibility = View.VISIBLE
+        // the notes it covers: from this label to the next
+        val spans = org.json.JSONArray()
+        var t = l.start; var mi = l.measure; var mStart = l.start - l.beat
+        while (t < l.end - 1e-6 && mi < sc.measures.size) {
+            val len = sc.measures[mi].length.takeIf { it > 0 } ?: (sc.measures[mi].beats * 4.0 / sc.measures[mi].beatType)
+            val t0 = t - mStart; val t1 = minOf(len, l.end - mStart)
+            spans.put(org.json.JSONObject().put("m", mi).put("t0", t0).put("t1", t1))
+            mStart += len; t = mStart; mi++
+        }
+        val pcs = org.json.JSONArray(); l.iv.forEach { pcs.put((l.rootPc + it) % 12) }
+        js("markChord($spans, $pcs); selChord($i)")
+        if (curA >= 0 && (l.measure < curA || l.measure > curB)) secs.firstOrNull { l.measure in it.first..it.second }?.let { showSection(it.first, it.second) }
+    }
+
+    private fun closeChord() { card.visibility = View.GONE; cur = -1; js("markChord([], [])") }
+
+    /** the chord on its own: bass (root or the inverted bass) + the chord tones around middle C */
+    private fun playChord(spread: Boolean) {
+        val l = labels.getOrNull(cur) ?: return
+        stop()
+        val pcs = l.iv.map { (l.rootPc + it) % 12 }
+        val bassPc = pcs[l.inv.coerceIn(0, pcs.size - 1)]
+        val notes = mutableListOf(36 + bassPc + if (bassPc < 5) 12 else 0)
+        var m = 55; for (pc in pcs) { while ((m % 12 + 12) % 12 != pc) m++; notes.add(m); m++ }
+        val tl = notes.mapIndexed { k, n -> if (spread) TNote(k * 0.28, 1.6 - k * 0.1, n, 'C', 0, 80) else TNote(0.0, 1.6, n, 'C', 0, 80) }
+        try {
+            val f = File(cacheDir, "chord.mid"); MidiPlayer.write(tl, f)
+            players.add(MidiPlayer.player(this, f, false).apply { setOnCompletionListener { stopPlayers() } }); players.last().start()
+        } catch (e: Exception) { toast("소리를 낼 수 없습니다") }
     }
 
     // ---------------------------------------------------------------- fingering

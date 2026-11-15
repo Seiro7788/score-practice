@@ -9,10 +9,14 @@
   .from { background: rgba(70,190,100,.18); border: 2px solid rgba(70,190,100,.9); }
   .to { background: rgba(255,125,125,.18); border: 2px solid rgba(255,125,125,.9); }
   #msg { padding: 40px 16px; color: #666; }
-  .ch { position: absolute; pointer-events: none; text-align: center; line-height: 1.05; white-space: nowrap; transform: translateX(-50%); background: rgba(255,255,255,.88); border-radius: 3px; padding: 0 2px; }
+  .ch { position: absolute; pointer-events: auto; cursor: pointer; text-align: center; line-height: 1.05; white-space: nowrap; transform: translateX(-50%); background: rgba(255,255,255,.88); border-radius: 3px; padding: 0 2px; }
   .ch b { display: block; color: #3f51b5; font-size: 12px; }
   .ch i { display: block; color: #b0306a; font-style: normal; font-size: 11px; }
-  .hide .ch { display: none; }
+  .ch u { display: block; color: #c62828; font-size: 10px; text-decoration: none; font-weight: bold; }
+  .ch.sel { outline: 2px solid #ff9800; }
+  .chf { position: absolute; height: 5px; border-radius: 2px; pointer-events: none; opacity: .75; }
+  .hide .ch, .hide .chf { display: none; }
+  .nofn .chf { display: none; }
   #dyn { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
   .nodyn #dyn { display: none; }
   .fing { font-family: serif; font-weight: bold; paint-order: stroke; stroke: #fff; stroke-width: 4px; }
@@ -76,23 +80,74 @@
   }
 
   // chord names + Roman numerals above the measures: [{m, beat (quarters), name, roman}]
+  // chord labels (tap one to study it), a coloured strip for its function (T blue, S green, D red, other purple)
+  // and the cadence under it
+  const FN = { T: '#3f7be0', S: '#2fa35a', D: '#e04848', X: '#9c6ade' };
   function drawChords(list) {
-    document.querySelectorAll('.ch').forEach(e => e.remove());
+    document.querySelectorAll('.ch, .chf').forEach(e => e.remove());
     const host = document.getElementById('osmd'), s = svgEl().getBoundingClientRect(), h = host.getBoundingClientRect(), u = unit();
     const ml = osmd.GraphicSheet.MeasureList;
-    for (const c of list) {
-      const b = boxes[c.m]; if (!b) continue;
+    const placed = [];
+    list.forEach((c, idx) => {
+      const b = boxes[c.m]; if (!b) return;
       let x = b.x0 + 1.5;
       const gm = (ml[c.m] || []).find(g => g && g.staffEntries && g.staffEntries.length);
       if (gm) {
         const e = gm.staffEntries.find(se => se.relInMeasureTimestamp.RealValue * 4 >= c.beat - 0.01);
         if (e) x = e.PositionAndShape.AbsolutePosition.x;
       }
-      const d = document.createElement('div'); d.className = 'ch';
-      d.innerHTML = '<b></b><i></i>'; d.firstChild.textContent = c.name; d.lastChild.textContent = c.roman;
+      const d = document.createElement('div'); d.className = 'ch'; d.dataset.i = idx;
+      d.innerHTML = '<b></b><i></i>' + (c.cad ? '<u></u>' : ''); d.children[0].textContent = c.name; d.children[1].textContent = c.roman;
+      if (c.cad) d.children[2].textContent = c.cad;
       d.style.left = (s.left - h.left + x * u) + 'px';
       d.style.top = (s.top - h.top + b.top * u - 36) + 'px';   // just above the top staff line
+      d.addEventListener('click', e => { e.stopPropagation(); if (window.Android && Android.chordTap) Android.chordTap(idx); });
       host.appendChild(d);
+      placed.push({ x, top: b.top, fn: c.fn || 'X', m: c.m });
+    });
+    // function strips: from each label to the next one on the same line (or the end of the line)
+    placed.forEach((p, k) => {
+      const nx = placed[k + 1];
+      let x1;
+      if (nx && Math.abs(nx.top - p.top) < 0.5) x1 = nx.x;
+      else { let j = p.m; while (boxes[j + 1] && Math.abs(boxes[j + 1].top - p.top) < 0.5) j++; x1 = boxes[j].x1; }
+      const f = document.createElement('div'); f.className = 'chf';
+      f.style.background = FN[p.fn] || FN.X;
+      f.style.left = (s.left - h.left + (p.x - 0.6) * u) + 'px'; f.style.width = Math.max(4, (x1 - p.x) * u - 2) + 'px';
+      f.style.top = (s.top - h.top + p.top * u - 7) + 'px';
+      host.appendChild(f);
+    });
+  }
+  function toggleFn(on) { document.getElementById('osmd').classList.toggle('nofn', !on); }
+  function selChord(i) { document.querySelectorAll('.ch').forEach(e => e.classList.toggle('sel', (e.dataset.i | 0) === i)); }
+
+  // the chord being studied: its notes ringed green (chord tones) or grey (notes outside the chord)
+  let chordMark = null;
+  function markChord(spans, pcs) {
+    chordMark = spans && spans.length ? [spans, pcs] : null;
+    document.querySelectorAll('.chm').forEach(e => e.remove());
+    if (!spans || !spans.length) { selChord(-1); return; }
+    const svg = svgEl(), ns = 'http://www.w3.org/2000/svg', ml = osmd.GraphicSheet.MeasureList;
+    let first = null;
+    for (const sp of spans) {
+      if (!drawn(sp.m)) continue;
+      for (const gm of ml[sp.m] || []) if (gm) for (const se of gm.staffEntries) {
+        const t = se.relInMeasureTimestamp.RealValue * 4;
+        if (t < sp.t0 - 0.001 || t >= sp.t1 - 0.001) continue;
+        for (const gve of se.graphicalVoiceEntries) for (const g of gve.notes) {
+          if (!g.sourceNote || g.sourceNote.isRest() || !g.sourceNote.Pitch) continue;
+          const a = g.PositionAndShape.AbsolutePosition;
+          const inC = pcs.includes(((g.sourceNote.halfTone % 12) + 12) % 12);
+          const c = document.createElementNS(ns, 'ellipse');
+          c.setAttribute('cx', ((a.x + 0.6) * 10).toFixed(1)); c.setAttribute('cy', (a.y * 10).toFixed(1));
+          c.setAttribute('rx', 10); c.setAttribute('ry', 8); c.setAttribute('class', 'chm');
+          c.setAttribute('fill', inC ? 'rgba(46,160,90,.28)' : 'none');
+          c.setAttribute('stroke', inC ? '#2e9e5a' : '#9e9e9e'); c.setAttribute('stroke-width', inC ? 2.4 : 1.6);
+          if (!inC) c.setAttribute('stroke-dasharray', '3 2');
+          svg.appendChild(c);
+          if (!first) first = a;
+        }
+      }
     }
   }
   let chordList = [];
@@ -126,6 +181,7 @@
   function setZoom(z) {
     osmd.zoom = z; applyRange(); osmd.render(); collect();
     drawChords(chordList); drawDyn(dynList); drawMelody(melodyOn); nidx = null; drawFingers();
+    if (chordMark) { markChord(chordMark[0], chordMark[1]); }
     for (const k of Object.keys(markIdx)) mark(k, markIdx[k]);
     if (window.Android) Android.onSection(range[0], range[1]);
   }
@@ -397,7 +453,7 @@
         if (i >= 0 && window.Android) Android.onMeasure(i);
       });
       if (window.Android) {
-        try { chordList = JSON.parse(Android.chords()); drawChords(chordList); toggleChords(Android.showChords()); } catch (e) {}
+        try { chordList = JSON.parse(Android.chords()); drawChords(chordList); toggleChords(Android.showChords()); toggleFn(Android.showFn()); } catch (e) {}
         try { dynList = JSON.parse(Android.dynamics()); drawDyn(dynList); toggleDyn(Android.showDyn()); } catch (e) {}
         try { melodyOn = Android.showMelody(); drawMelody(melodyOn); } catch (e) {}
         try { setFingers(JSON.parse(Android.xfingers()), Android.fingerScale()); } catch (e) {}
