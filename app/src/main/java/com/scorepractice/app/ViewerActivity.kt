@@ -299,13 +299,12 @@ class ViewerActivity : AppCompatActivity(), PageView.Host {
     private fun setupMetronome(id: String) {
         metroBar = findViewById(R.id.metroBar); mBpm = findViewById(R.id.mBpm)
         mPlay = findViewById(R.id.mPlay); mBeats = findViewById(R.id.mBeats)
-        // this score's own tempo; a score opened for the first time starts from the tempo used most recently
-        metro.bpm = if (data.bpm > 0) data.bpm else prefs.getInt("tempo_$id", prefs.getInt("tempo_last", 100))
-        metro.beats = if (data.beats > 0) data.beats else prefs.getInt("meter_$id", prefs.getInt("meter_last", 1))
+        // each score keeps its own metronome; a score never set starts at 100, no beat (never another score's setting)
+        metro.bpm = if (data.bpm > 0) data.bpm else prefs.getInt("tempo_$id", 100)
+        metro.beats = if (data.beats > 0) data.beats else prefs.getInt("meter_$id", 1)
         val show = {
             if (mBpm.text.toString() != metro.bpm.toString()) mBpm.setText(metro.bpm.toString())
             mBeats.text = if (metro.beats == 1) "박없음" else "${metro.beats}박"
-            prefs.edit().putInt("tempo_last", metro.bpm).putInt("meter_last", metro.beats).apply()
             if (data.bpm != metro.bpm || data.beats != metro.beats) {
                 data.bpm = metro.bpm; data.beats = metro.beats
                 persist()   // kept with the score (and in backups); not an undo step

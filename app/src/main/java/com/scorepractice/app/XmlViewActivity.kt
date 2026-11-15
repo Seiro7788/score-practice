@@ -159,7 +159,6 @@ class XmlViewActivity : AppCompatActivity() {
         bpm = v.coerceIn(20, 300)
         if (tempo.text.toString() != bpm.toString()) tempo.setText(bpm.toString())
         if (data.xmlBpm != bpm) { data.xmlBpm = bpm; saveData() }
-        getSharedPreferences("settings", MODE_PRIVATE).edit().putInt("xml_tempo_last", bpm).apply()
         // playing: carry on at the new tempo from the measure being played
         if (players.isNotEmpty()) { val at = if (lastMark >= 0) lastMark else playA; stopPlayers(); play(at, playB) }
     }
@@ -504,10 +503,8 @@ class XmlViewActivity : AppCompatActivity() {
     }
 }
 
-/** XML tempo: this score's last XML tempo → the last XML tempo used anywhere → the score's own marking → 100 */
+/** XML tempo, kept per score: this score's last XML tempo → the score's own marking → 100 */
 fun xmlTempo(c: android.content.Context, d: ScoreData, sc: XScore?): Int {
     if (d.xmlBpm > 0) return d.xmlBpm
-    val p = c.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-    if (p.contains("xml_tempo_last")) return p.getInt("xml_tempo_last", 100)
     return if (sc != null && sc.tempo > 0) sc.tempo else 100
 }
