@@ -43,9 +43,10 @@ jobs:
           key: buildozer-${{ hashFiles('buildozer.spec') }}
 
       - name: Build debug APK
-        run: |
-          set -o pipefail
-          yes | buildozer android debug
+        # `yes | buildozer` 는 buildozer 종료 후 yes 가 broken pipe 로 1 을 반환해
+        # pipefail 때문에 APK 가 정상 빌드돼도 스텝이 실패로 처리됨. 라이선스는
+        # android.accept_sdk_license=True 로 자동 수락되므로 파이프 없이 직접 실행.
+        run: buildozer android debug
         env:
           ANDROIDAPI: "34"
           ANDROIDMINAPI: "24"
