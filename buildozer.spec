@@ -7,10 +7,11 @@ source.include_exts = py,ttf,db
 source.include_patterns = assets/*
 version = 1.0
 requirements = python3,kivy==2.3.1
-# p4a develop: PR#3366 이 python 모듈 설치 단계의 (python3.14) venv 생성을 제거하고
-# 비호환 휠(charset_normalizer 등 Kivy 가 선언한 미사용 의존성)을 올바르게 무시한다.
-# 태그 릴리스에는 이 수정이 아직 없어 charset_normalizer 설치에서 실패함.
-p4a.branch = develop
+# p4a v2024.01.21: 의존성 자동해석(charset_normalizer native wheel 실패의 원인)과
+# libthorvg 레시피(NDK 25b 와 경로 불일치로 IndexError) 둘 다 없는 안정 릴리스.
+# Kivy 레시피는 체크섬 없는 zip 이라 kivy==2.3.1 로 안전하게 오버라이드되고,
+# 2.3.0 전용 패치는 2.3.1 에 적용되지 않음. NDK 권장도 25b 로 일치.
+p4a.branch = v2024.01.21
 orientation = portrait
 fullscreen = 0
 android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
