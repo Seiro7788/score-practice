@@ -7,9 +7,10 @@ source.include_exts = py,ttf,db
 source.include_patterns = assets/*
 version = 1.0
 requirements = python3,kivy==2.3.1
-# 최신 p4a 릴리스: 호환되지 않는 비순수파이썬 휠(charset_normalizer 등 Kivy 가 선언한
-# 미사용 의존성)을 자동으로 무시(is_wheel_compatible). 구버전 p4a 는 이걸 설치하려다 실패.
-p4a.branch = v2026.05.09
+# p4a develop: PR#3366 이 python 모듈 설치 단계의 (python3.14) venv 생성을 제거하고
+# 비호환 휠(charset_normalizer 등 Kivy 가 선언한 미사용 의존성)을 올바르게 무시한다.
+# 태그 릴리스에는 이 수정이 아직 없어 charset_normalizer 설치에서 실패함.
+p4a.branch = develop
 orientation = portrait
 fullscreen = 0
 android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
