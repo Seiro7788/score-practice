@@ -6,7 +6,7 @@ source.dir = .
 source.include_exts = py,ttf,db
 source.include_patterns = assets/*
 version = 1.0
-requirements = python3,kivy==2.3.1,plyer
+requirements = python3,kivy==2.3.1
 orientation = portrait
 fullscreen = 0
 android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE

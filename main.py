@@ -168,17 +168,45 @@ class RosterApp(App):
             except Exception:
                 continue
 
-    def pick_db(self):
-        try:
-            from plyer import filechooser
-            filechooser.open_file(on_selection=self._picked,
-                                  filters=[["DB", "*.db"]])
-        except Exception as ex:
-            self._toast(f"파일 선택 불가: {ex}")
+    def _find_dbs(self):
+        """폰 내 .db 후보 목록(다운로드/저장소/앱폴더)."""
+        bases = ["/sdcard/Download", "/storage/emulated/0/Download",
+                 "/sdcard", "/storage/emulated/0",
+                 os.path.dirname(os.path.abspath(__file__))]
+        seen, out = set(), []
+        for b in bases:
+            try:
+                for f in sorted(os.listdir(b)):
+                    if f.lower().endswith(".db"):
+                        p = os.path.join(b, f)
+                        if p not in seen:
+                            seen.add(p); out.append(p)
+            except Exception:
+                continue
+        return out
 
-    def _picked(self, sel):
-        if sel:
-            self.load_db(sel[0])
+    def pick_db(self):
+        dbs = self._find_dbs()
+        box = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(10))
+        if not dbs:
+            box.add_widget(Label(
+                text="폰에서 .db 파일을 찾지 못했습니다.\n\n"
+                     "PC에서 만든 .db 파일을 폰의\n[b]Download[/b] 폴더에 복사한 뒤\n다시 'DB 열기'를 누르세요.",
+                markup=True, halign="center"))
+        else:
+            box.add_widget(Label(text="열 DB를 선택하세요", size_hint_y=None, height=dp(28), bold=True))
+            sc = ScrollView()
+            lst = GridLayout(cols=1, size_hint_y=None, spacing=dp(3))
+            lst.bind(minimum_height=lst.setter("height"))
+            for p in dbs:
+                b = _btn(os.path.basename(p), size_hint_y=None, height=dp(44))
+                b.bind(on_release=lambda inst, pp=p: (pop.dismiss(), self.load_db(pp)))
+                lst.add_widget(b)
+            sc.add_widget(lst); box.add_widget(sc)
+        box.add_widget(_btn("닫기", size_hint_y=None, height=dp(44),
+                            on_release=lambda *a: pop.dismiss()))
+        pop = Popup(title="DB 선택", content=box, size_hint=(.92, .8))
+        pop.open()
 
     def load_db(self, path):
         try:
@@ -220,15 +248,9 @@ class RosterApp(App):
         pop.open()
 
     def _toast(self, msg):
-        try:
-            if platform == "android":
-                from kivy.clock import Clock
-                from plyer import notification  # noqa
-        except Exception:
-            pass
+        from kivy.clock import Clock
         p = Popup(title="", content=Label(text=msg), size_hint=(.8, None), height=dp(120),
                   separator_height=0)
-        from kivy.clock import Clock
         p.open()
         Clock.schedule_once(lambda *a: p.dismiss(), 1.4)
 
