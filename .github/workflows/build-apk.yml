@@ -7,6 +7,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -61,3 +63,19 @@ jobs:
           name: crewroster-apk
           path: bin/*.apk
           if-no-files-found: error
+
+      # 아티팩트는 Azure blob 로만 받을 수 있어 일부 환경에서 접근이 막힌다.
+      # git(github.com)으로는 받을 수 있으므로 APK 를 별도 apk 브랜치에 커밋한다.
+      - name: Publish APK to apk branch
+        run: |
+          APK="$(ls bin/*.apk | head -n1)"
+          cp "$APK" /tmp/crewroster.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan apk
+          git reset --hard
+          cp /tmp/crewroster.apk ./crewroster.apk
+          echo "APK built from $GITHUB_SHA on $(date -u)" > BUILD_INFO.txt
+          git add -f crewroster.apk BUILD_INFO.txt
+          git commit -m "APK build $GITHUB_SHA"
+          git push -f origin apk
