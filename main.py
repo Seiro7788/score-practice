@@ -11,7 +11,8 @@ import datetime as _dt
 from kivy.config import Config
 Config.set("input", "mouse", "mouse,multitouch_on_demand")
 
-BUILD = "v3"
+__version__ = "1.1"
+BUILD = __version__
 
 
 def _android_app_dir():
@@ -194,6 +195,23 @@ class PersonScreen(Screen):
             self.lst.add_widget(row)
 
 
+class StartScreen(Screen):
+    """최소 화면 — 이 화면이 보이면 Kivy·SDL·한글폰트는 정상.
+    여기서 '앱 시작'을 눌러 본 UI 로 전환(어느 단계에서 튕기는지 범위 좁히기용)."""
+    def __init__(self, app, **kw):
+        super().__init__(**kw)
+        self.app = app
+        root = BoxLayout(orientation="vertical", padding=dp(24), spacing=dp(16))
+        root.add_widget(Label(
+            text=f"교번 모바일 {__version__}\n\n이 화면이 보이면 정상입니다.\n"
+                 "아래 '앱 시작'을 눌러 주세요.",
+            halign="center", valign="middle", font_size=dp(18)))
+        root.add_widget(_btn("앱 시작 ▶", size_hint_y=None, height=dp(56),
+                             font_size=dp(18),
+                             on_release=lambda *a: self.app.enter_app()))
+        self.add_widget(root)
+
+
 class ErrorScreen(Screen):
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -234,16 +252,31 @@ class RosterApp(App):
     def _build(self):
         self.wb = None
         self._err_shown = False
+        self._entered = False
         self.sm = ScreenManager()
-        self.home = HomeScreen(self, name="home")
-        self.person_scr = PersonScreen(self, name="person")
+        self.start_scr = StartScreen(self, name="start")
         self.err_scr = ErrorScreen(name="error")
-        self.sm.add_widget(self.home)
-        self.sm.add_widget(self.person_scr)
+        self.sm.add_widget(self.start_scr)
         self.sm.add_widget(self.err_scr)
-        if not _FONT_OK:
-            self.home.info.text = f"{BUILD} · 폰트 미로드(한글 깨질 수 있음)"
+        self.sm.current = "start"
         return self.sm
+
+    def enter_app(self):
+        """'앱 시작' 탭 시 본 UI 를 구성·전환. 여기서 문제가 나면 ErrorScreen 에 표시됨."""
+        try:
+            if not self._entered:
+                self.home = HomeScreen(self, name="home")
+                self.person_scr = PersonScreen(self, name="person")
+                self.sm.add_widget(self.home)
+                self.sm.add_widget(self.person_scr)
+                self._entered = True
+                if not _FONT_OK:
+                    self.home.info.text = f"{BUILD} · 폰트 미로드"
+            self.sm.current = "home"
+        except Exception:
+            msg = traceback.format_exc()
+            _write_crash(msg)
+            self.show_error(msg)
 
     def _error_root(self, msg):
         root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(6))
