@@ -49,9 +49,6 @@ jobs:
         env:
           ANDROIDAPI: "34"
           ANDROIDMINAPI: "24"
-          # charset_normalizer 가 C확장 휠로 빌드돼 호스트 pip 설치에 실패하는 것을 막음
-          # (mypyc 비활성화 → py3-none-any 순수파이썬 휠). blacklist 와 함께 2중 안전장치.
-          CHARSET_NORMALIZER_USE_MYPYC: "0"
 
       - name: Locate APK
         id: apk

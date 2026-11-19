@@ -7,9 +7,9 @@ source.include_exts = py,ttf,db
 source.include_patterns = assets/*
 version = 1.0
 requirements = python3,kivy==2.3.1
-# Kivy 2.3.1 메타데이터가 선언하는 미사용 의존성(requests 등)을 p4a가 android 휠로
-# 빌드하려다 실패하므로 제외. 이 앱은 kivy core + sqlite3 만 사용.
-p4a.extra_args = --blacklist-requirements=requests,charset-normalizer,urllib3,certifi,idna,chardet,filetype,six,docutils,pygments,kivy-garden
+# 최신 p4a 릴리스: 호환되지 않는 비순수파이썬 휠(charset_normalizer 등 Kivy 가 선언한
+# 미사용 의존성)을 자동으로 무시(is_wheel_compatible). 구버전 p4a 는 이걸 설치하려다 실패.
+p4a.branch = v2026.05.09
 orientation = portrait
 fullscreen = 0
 android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
