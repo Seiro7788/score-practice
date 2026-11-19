@@ -11,10 +11,29 @@ import datetime as _dt
 from kivy.config import Config
 Config.set("input", "mouse", "mouse,multitouch_on_demand")
 
+BUILD = "v3"
+
+
+def _android_app_dir():
+    """앱 전용 외부폴더(/sdcard/Android/data/<pkg>/files) — 권한 없이 읽기/쓰기 가능."""
+    try:
+        from android import mActivity  # noqa
+        f = mActivity.getExternalFilesDir(None)
+        if f:
+            return f.getAbsolutePath()
+    except Exception:
+        pass
+    return None
+
 
 def _crash_dirs():
-    return ["/sdcard/Download", "/storage/emulated/0/Download", "/sdcard",
-            "/storage/emulated/0", os.path.dirname(os.path.abspath(__file__))]
+    d = []
+    a = _android_app_dir()
+    if a:
+        d.append(a)
+    d += ["/sdcard/Download", "/storage/emulated/0/Download", "/sdcard",
+          "/storage/emulated/0", os.path.dirname(os.path.abspath(__file__))]
+    return d
 
 
 def _write_crash(msg):
@@ -37,6 +56,8 @@ def _excepthook(et, e, tb):
 sys.excepthook = _excepthook
 
 from kivy.app import App
+from kivy.base import ExceptionHandler, ExceptionManager
+from kivy.clock import Clock
 from kivy.core.text import LabelBase
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
@@ -53,9 +74,14 @@ import core
 
 # 한글 폰트 등록(기본 폰트 교체 → 모든 위젯 한글 렌더)
 _FONT = os.path.join(os.path.dirname(__file__), "assets", "NotoSansKR.ttf")
-if os.path.exists(_FONT):
-    LabelBase.register("Roboto", fn_regular=_FONT)
-    LabelBase.register("KR", fn_regular=_FONT)
+_FONT_OK = False
+try:
+    if os.path.exists(_FONT):
+        LabelBase.register("Roboto", fn_regular=_FONT)
+        LabelBase.register("KR", fn_regular=_FONT)
+        _FONT_OK = True
+except Exception:
+    _FONT_OK = False
 
 NAVY = (0.149, 0.259, 0.420, 1)
 WD = "월화수목금토일"
@@ -79,16 +105,19 @@ class HomeScreen(Screen):
         self.path_lbl = Label(text="DB를 여세요", shorten=True, halign="left", valign="middle")
         self.path_lbl.bind(size=self.path_lbl.setter("text_size"))
         bar.add_widget(self.path_lbl)
-        bar.add_widget(_btn("DB 열기", size_hint_x=None, width=dp(100), on_release=lambda *a: self.app.pick_db()))
+        bar.add_widget(_btn("DB 열기", size_hint_x=None, width=dp(100),
+                            on_release=lambda *a: self.app.pick_db()))
         root.add_widget(bar)
 
         sb = BoxLayout(size_hint_y=None, height=dp(44), padding=dp(6), spacing=dp(6))
-        self.search = TextInput(hint_text="이름·사번 검색", multiline=False, size_hint_y=None, height=dp(40))
+        self.search = TextInput(hint_text="이름·사번 검색", multiline=False,
+                                size_hint_y=None, height=dp(40))
         self.search.bind(text=lambda *a: self.refresh())
         sb.add_widget(self.search)
         root.add_widget(sb)
 
-        self.info = Label(text="", size_hint_y=None, height=dp(24), color=(.4, .4, .4, 1), font_size=dp(12))
+        self.info = Label(text=f"{BUILD} · 로드 완료", size_hint_y=None, height=dp(24),
+                          color=(.4, .4, .4, 1), font_size=dp(12))
         root.add_widget(self.info)
 
         sc = ScrollView()
@@ -165,31 +194,61 @@ class PersonScreen(Screen):
             self.lst.add_widget(row)
 
 
+class ErrorScreen(Screen):
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(6))
+        root.add_widget(Label(text="오류가 발생했습니다 (화면 캡처해 보내주세요)",
+                              size_hint_y=None, height=dp(34), bold=True, color=(.85, .1, .1, 1)))
+        sc = ScrollView()
+        self.lbl = Label(text="", size_hint_y=None, halign="left", valign="top",
+                         font_size=dp(12), color=(.1, .1, .1, 1))
+        self.lbl.bind(width=lambda i, w: setattr(i, "text_size", (w, None)),
+                      texture_size=lambda i, s: setattr(i, "height", s[1]))
+        sc.add_widget(self.lbl)
+        root.add_widget(sc)
+        self.add_widget(root)
+
+
+class _KivyErr(ExceptionHandler):
+    def handle_exception(self, inst):
+        msg = traceback.format_exc()
+        _write_crash(msg)
+        try:
+            App.get_running_app().show_error(msg)
+        except Exception:
+            pass
+        return ExceptionManager.PASS
+
+
 class RosterApp(App):
     def build(self):
+        ExceptionManager.add_handler(_KivyErr())
         try:
             return self._build()
         except Exception:
             msg = traceback.format_exc()
             _write_crash(msg)
-            return self._error_widget(msg)
+            return self._error_root(msg)
 
     def _build(self):
         self.wb = None
+        self._err_shown = False
         self.sm = ScreenManager()
         self.home = HomeScreen(self, name="home")
         self.person_scr = PersonScreen(self, name="person")
+        self.err_scr = ErrorScreen(name="error")
         self.sm.add_widget(self.home)
         self.sm.add_widget(self.person_scr)
-        if platform == "android":
-            self._req_perms()
-            self._autofind_db()
+        self.sm.add_widget(self.err_scr)
+        if not _FONT_OK:
+            self.home.info.text = f"{BUILD} · 폰트 미로드(한글 깨질 수 있음)"
         return self.sm
 
-    def _error_widget(self, msg):
+    def _error_root(self, msg):
         root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(6))
-        root.add_widget(Label(text="시작 중 오류가 발생했습니다", size_hint_y=None,
-                              height=dp(34), bold=True, color=(.8, .1, .1, 1)))
+        root.add_widget(Label(text="시작 중 오류 (화면 캡처해 보내주세요)", size_hint_y=None,
+                              height=dp(34), bold=True, color=(.85, .1, .1, 1)))
         sc = ScrollView()
         lbl = Label(text=msg, size_hint_y=None, halign="left", valign="top",
                     font_size=dp(12), color=(.1, .1, .1, 1))
@@ -199,6 +258,17 @@ class RosterApp(App):
         root.add_widget(sc)
         return root
 
+    def show_error(self, msg):
+        def _do(*a):
+            try:
+                self.err_scr.lbl.text = msg
+                self.sm.current = "error"
+            except Exception:
+                pass
+        if not getattr(self, "_err_shown", False):
+            self._err_shown = True
+            Clock.schedule_once(_do, 0)
+
     def _req_perms(self):
         try:
             from android.permissions import request_permissions, Permission
@@ -207,20 +277,15 @@ class RosterApp(App):
         except Exception:
             pass
 
-    def _autofind_db(self):
-        for base in ("/sdcard/Download", "/storage/emulated/0/Download", "/sdcard"):
-            try:
-                for f in os.listdir(base):
-                    if f.endswith(".db"):
-                        return self.load_db(os.path.join(base, f))
-            except Exception:
-                continue
-
     def _find_dbs(self):
-        """폰 내 .db 후보 목록(다운로드/저장소/앱폴더)."""
-        bases = ["/sdcard/Download", "/storage/emulated/0/Download",
-                 "/sdcard", "/storage/emulated/0",
-                 os.path.dirname(os.path.abspath(__file__))]
+        """폰 내 .db 후보 목록(앱폴더/다운로드/저장소)."""
+        bases = []
+        a = _android_app_dir()
+        if a:
+            bases.append(a)
+        bases += ["/sdcard/Download", "/storage/emulated/0/Download",
+                  "/sdcard", "/storage/emulated/0",
+                  os.path.dirname(os.path.abspath(__file__))]
         seen, out = set(), []
         for b in bases:
             try:
@@ -228,18 +293,24 @@ class RosterApp(App):
                     if f.lower().endswith(".db"):
                         p = os.path.join(b, f)
                         if p not in seen:
-                            seen.add(p); out.append(p)
+                            seen.add(p)
+                            out.append(p)
             except Exception:
                 continue
         return out
 
     def pick_db(self):
+        # 파일 접근 권한은 이 시점에 요청(시작 시 팝업으로 인한 재개 크래시 회피)
+        self._req_perms()
         dbs = self._find_dbs()
+        appdir = _android_app_dir() or "(앱 폴더)"
         box = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(10))
         if not dbs:
             box.add_widget(Label(
                 text="폰에서 .db 파일을 찾지 못했습니다.\n\n"
-                     "PC에서 만든 .db 파일을 폰의\n[b]Download[/b] 폴더에 복사한 뒤\n다시 'DB 열기'를 누르세요.",
+                     "PC의 .db 파일을 폰의 [b]Download[/b] 폴더(또는 아래 앱 폴더)에\n"
+                     "복사한 뒤 다시 'DB 열기'를 누르세요.\n\n"
+                     f"[size=11sp]{appdir}[/size]",
                 markup=True, halign="center"))
         else:
             box.add_widget(Label(text="열 DB를 선택하세요", size_hint_y=None, height=dp(28), bold=True))
@@ -250,7 +321,8 @@ class RosterApp(App):
                 b = _btn(os.path.basename(p), size_hint_y=None, height=dp(44))
                 b.bind(on_release=lambda inst, pp=p: (pop.dismiss(), self.load_db(pp)))
                 lst.add_widget(b)
-            sc.add_widget(lst); box.add_widget(sc)
+            sc.add_widget(lst)
+            box.add_widget(sc)
         box.add_widget(_btn("닫기", size_hint_y=None, height=dp(44),
                             on_release=lambda *a: pop.dismiss()))
         pop = Popup(title="DB 선택", content=box, size_hint=(.92, .8))
@@ -262,8 +334,10 @@ class RosterApp(App):
             self.home.path_lbl.text = os.path.basename(path)
             self.home.refresh()
             self._toast(f"{os.path.basename(path)} 열림 ({len(self.wb.persons)}명)")
-        except Exception as ex:
-            self._toast(f"열기 실패: {ex}")
+        except Exception:
+            msg = traceback.format_exc()
+            _write_crash(msg)
+            self.show_error(msg)
 
     def open_person(self, p):
         self.person_scr.load(p)
@@ -273,7 +347,8 @@ class RosterApp(App):
         wb = self.wb
         cur = core.effective_value(wb, p.row, gc)
         box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(10))
-        box.add_widget(Label(text=f"{p.name} · {d.month}/{d.day}", bold=True, size_hint_y=None, height=dp(30)))
+        box.add_widget(Label(text=f"{p.name} · {d.month}/{d.day}", bold=True,
+                             size_hint_y=None, height=dp(30)))
         ti = TextInput(text="" if not wb.grid.is_manual.get((p.row, gc)) else cur,
                        hint_text="다이아번호 / S / 교육 등", multiline=False,
                        size_hint_y=None, height=dp(44))
@@ -296,7 +371,6 @@ class RosterApp(App):
         pop.open()
 
     def _toast(self, msg):
-        from kivy.clock import Clock
         p = Popup(title="", content=Label(text=msg), size_hint=(.8, None), height=dp(120),
                   separator_height=0)
         p.open()
