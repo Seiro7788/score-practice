@@ -4,10 +4,37 @@ DB 열기 → 승무원 검색 → 승무원 선택 → 날짜별 근무 보기 
 회전편성은 데스크톱과 동일 로직(검증 23207/0). 한글 폰트 내장.
 """
 import os
+import sys
+import traceback
 import datetime as _dt
 
 from kivy.config import Config
 Config.set("input", "mouse", "mouse,multitouch_on_demand")
+
+
+def _crash_dirs():
+    return ["/sdcard/Download", "/storage/emulated/0/Download", "/sdcard",
+            "/storage/emulated/0", os.path.dirname(os.path.abspath(__file__))]
+
+
+def _write_crash(msg):
+    for base in _crash_dirs():
+        try:
+            p = os.path.join(base, "crewroster_error.txt")
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(msg)
+            return p
+        except Exception:
+            continue
+    return None
+
+
+def _excepthook(et, e, tb):
+    _write_crash("".join(traceback.format_exception(et, e, tb)))
+    sys.__excepthook__(et, e, tb)
+
+
+sys.excepthook = _excepthook
 
 from kivy.app import App
 from kivy.core.text import LabelBase
@@ -140,6 +167,14 @@ class PersonScreen(Screen):
 
 class RosterApp(App):
     def build(self):
+        try:
+            return self._build()
+        except Exception:
+            msg = traceback.format_exc()
+            _write_crash(msg)
+            return self._error_widget(msg)
+
+    def _build(self):
         self.wb = None
         self.sm = ScreenManager()
         self.home = HomeScreen(self, name="home")
@@ -150,6 +185,19 @@ class RosterApp(App):
             self._req_perms()
             self._autofind_db()
         return self.sm
+
+    def _error_widget(self, msg):
+        root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(6))
+        root.add_widget(Label(text="시작 중 오류가 발생했습니다", size_hint_y=None,
+                              height=dp(34), bold=True, color=(.8, .1, .1, 1)))
+        sc = ScrollView()
+        lbl = Label(text=msg, size_hint_y=None, halign="left", valign="top",
+                    font_size=dp(12), color=(.1, .1, .1, 1))
+        lbl.bind(width=lambda i, w: setattr(i, "text_size", (w, None)),
+                 texture_size=lambda i, s: setattr(i, "height", s[1]))
+        sc.add_widget(lbl)
+        root.add_widget(sc)
+        return root
 
     def _req_perms(self):
         try:
