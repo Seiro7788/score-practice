@@ -11,7 +11,7 @@ import datetime as _dt
 from kivy.config import Config
 Config.set("input", "mouse", "mouse,multitouch_on_demand")
 
-__version__ = "1.7"
+__version__ = "1.8"
 BUILD = __version__
 
 
@@ -97,6 +97,11 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import ScreenManager, Screen
+from kivy.uix.recycleview import RecycleView
+from kivy.uix.recycleboxlayout import RecycleBoxLayout
+from kivy.uix.behaviors import ButtonBehavior
+from kivy.properties import StringProperty, NumericProperty, BooleanProperty
+from kivy.lang import Builder
 from kivy.metrics import dp
 from kivy.utils import platform
 
@@ -134,46 +139,139 @@ class Row(Button):
     pass
 
 
+# ---- RecycleView 행(긴 목록 스크롤이 확실히 동작) + 디자인 --------------------
+class PersonRowRV(ButtonBehavior, BoxLayout):
+    name = StringProperty("")
+    sub = StringProperty("")
+    idx = NumericProperty(-1)
+
+
+class DayRowRV(BoxLayout):
+    date_text = StringProperty("")
+    value = StringProperty("")
+    idx = NumericProperty(-1)
+    manual = BooleanProperty(False)
+    holiday = BooleanProperty(False)
+
+
+Builder.load_string("""
+<PersonRowRV>:
+    orientation: 'vertical'
+    size_hint_y: None
+    height: dp(62)
+    padding: dp(14), dp(8)
+    on_release: app.open_person_idx(self.idx)
+    canvas.before:
+        Color:
+            rgba: (0.86,0.91,1,1) if self.state=='down' else (1,1,1,1)
+        RoundedRectangle:
+            pos: self.x+dp(5), self.y+dp(3)
+            size: self.width-dp(10), self.height-dp(6)
+            radius: [dp(12),]
+    Label:
+        text: root.name
+        font_size: dp(18)
+        bold: True
+        color: 0.1,0.12,0.18,1
+        halign: 'left'
+        valign: 'bottom'
+        text_size: self.width, self.height
+    Label:
+        text: root.sub
+        font_size: dp(12.5)
+        color: 0.5,0.52,0.58,1
+        halign: 'left'
+        valign: 'top'
+        text_size: self.width, self.height
+
+<DayRowRV>:
+    orientation: 'horizontal'
+    size_hint_y: None
+    height: dp(58)
+    spacing: dp(8)
+    padding: dp(8), dp(4)
+    canvas.before:
+        Color:
+            rgba: 1,1,1,1
+        RoundedRectangle:
+            pos: self.x+dp(2), self.y+dp(1)
+            size: self.width-dp(4), self.height-dp(2)
+            radius: [dp(8),]
+    Label:
+        text: root.date_text
+        size_hint_x: None
+        width: dp(66)
+        halign: 'center'
+        valign: 'middle'
+        text_size: self.size
+        font_size: dp(14)
+        color: (0.82,0.12,0.12,1) if root.holiday else (0.28,0.3,0.36,1)
+    Button:
+        text: root.value
+        font_size: dp(20)
+        bold: True
+        background_normal: ''
+        background_down: ''
+        background_color: (1,0.86,0.5,1) if root.manual else (0.9,0.94,1,1)
+        color: 0.12,0.12,0.16,1
+        on_release: app.edit_cell_idx(root.idx)
+""")
+
+
 class HomeScreen(Screen):
     def __init__(self, app, **kw):
         super().__init__(**kw)
         self.app = app
         root = BoxLayout(orientation="vertical")
-        bar = BoxLayout(size_hint_y=None, height=dp(52), padding=dp(6), spacing=dp(6))
-        self.path_lbl = Label(text="DB를 여세요", shorten=True, halign="left", valign="middle")
+        with root.canvas.before:
+            from kivy.graphics import Color, Rectangle
+            self._bg = Color(0.95, 0.96, 0.98, 1)
+            self._bgr = Rectangle(pos=root.pos, size=root.size)
+        root.bind(pos=lambda w, v: setattr(self._bgr, "pos", v),
+                  size=lambda w, v: setattr(self._bgr, "size", v))
+
+        bar = BoxLayout(size_hint_y=None, height=dp(56), padding=[dp(10), dp(6)], spacing=dp(8))
+        self.path_lbl = Label(text="DB를 여세요", shorten=True, halign="left", valign="middle",
+                              bold=True, font_size=dp(16), color=(.12, .14, .2, 1))
         self.path_lbl.bind(size=self.path_lbl.setter("text_size"))
         bar.add_widget(self.path_lbl)
-        bar.add_widget(_btn("DB 열기", size_hint_x=None, width=dp(100),
+        bar.add_widget(_btn("DB 열기", size_hint_x=None, width=dp(104), font_size=dp(15),
+                            background_normal="", background_color=NAVY, color=(1, 1, 1, 1),
                             on_release=lambda *a: self.app.pick_db()))
         root.add_widget(bar)
 
-        sb = BoxLayout(size_hint_y=None, height=dp(44), padding=dp(6), spacing=dp(6))
+        sb = BoxLayout(size_hint_y=None, height=dp(48), padding=[dp(10), dp(2)], spacing=dp(6))
         self.search = TextInput(hint_text="이름·사번 검색", multiline=False,
-                                size_hint_y=None, height=dp(40))
+                                size_hint_y=None, height=dp(42), font_size=dp(16),
+                                padding=[dp(10), dp(10)])
         self.search.bind(text=lambda *a: self.refresh())
         sb.add_widget(self.search)
         root.add_widget(sb)
 
-        self.info = Label(text=f"{BUILD} · 로드 완료", size_hint_y=None, height=dp(24),
-                          color=(.4, .4, .4, 1), font_size=dp(12))
+        self.info = Label(text=f"{BUILD} · 로드 완료", size_hint_y=None, height=dp(22),
+                          color=(.45, .45, .5, 1), font_size=dp(12))
         root.add_widget(self.info)
 
-        sc = make_scroll()
-        self.lst = GridLayout(cols=1, size_hint_y=None, spacing=dp(3), padding=dp(4))
-        self.lst.bind(minimum_height=self.lst.setter("height"))
-        sc.add_widget(self.lst)
-        root.add_widget(sc)
+        self.rv = RecycleView(scroll_type=["content", "bars"], bar_width=dp(6),
+                              bar_color=(.4, .4, .45, .7))
+        rbl = RecycleBoxLayout(orientation="vertical", default_size=(None, dp(62)),
+                               default_size_hint=(1, None), size_hint_y=None, spacing=dp(4),
+                               padding=[dp(4), dp(4)])
+        rbl.bind(minimum_height=rbl.setter("height"))
+        self.rv.add_widget(rbl)
+        self.rv.viewclass = "PersonRowRV"
+        root.add_widget(self.rv)
 
         foot = Label(text=f"교번 모바일 {__version__}  ·  제작 smartrain7788",
                      size_hint_y=None, height=dp(22), font_size=dp(11),
-                     color=(.55, .55, .55, 1))
+                     color=(.55, .55, .6, 1))
         root.add_widget(foot)
         self.add_widget(root)
 
     def refresh(self):
-        self.lst.clear_widgets()
         wb = self.app.wb
         if not wb:
+            self.rv.data = []
             return
         q = self.search.text.strip()
         persons = [wb.row_person[r] for r in wb.grid.person_rows if r in wb.row_person]
@@ -181,15 +279,11 @@ class HomeScreen(Screen):
         if q:
             persons = [p for p in persons if q in p.name or q in str(p.emp_no)]
         self.info.text = f"{len(persons)}명 · {wb.grid.work_month}월 작업"
-        self.app._order = list(persons[:600])
-        for p in self.app._order:
-            b = Row(text=f"  {p.name}    {p.emp_no}    {p.team}", size_hint_y=None, height=dp(52),
-                    halign="left", valign="middle", font_size=dp(16),
-                    background_normal="", background_color=(.96, .97, .99, 1),
-                    color=(.1, .1, .1, 1))
-            b.bind(size=lambda i, s: setattr(i, "text_size", (i.width - dp(20), None)))
-            b.bind(on_release=lambda inst, pr=p: self.app.open_person(pr))
-            self.lst.add_widget(b)
+        self.app._order = list(persons)
+        self.rv.data = [
+            {"name": p.name, "sub": f"{p.emp_no}   ·   {p.team}", "idx": i}
+            for i, p in enumerate(self.app._order)]
+        self.rv.scroll_y = 1
 
 
 class PersonScreen(Screen):
@@ -197,63 +291,76 @@ class PersonScreen(Screen):
         super().__init__(**kw)
         self.app = app
         self.person = None
+        self.days = []   # [(gc, d), ...] — edit_cell_idx 가 참조
         root = BoxLayout(orientation="vertical")
-        bar = BoxLayout(size_hint_y=None, height=dp(52), padding=dp(5), spacing=dp(5))
-        bar.add_widget(_btn("목록", size_hint_x=None, width=dp(66),
+        bar = BoxLayout(size_hint_y=None, height=dp(56), padding=[dp(6), dp(5)], spacing=dp(5))
+        with bar.canvas.before:
+            from kivy.graphics import Color, Rectangle
+            Color(*NAVY)
+            self._barbg = Rectangle(pos=bar.pos, size=bar.size)
+        bar.bind(pos=lambda w, v: setattr(self._barbg, "pos", v),
+                 size=lambda w, v: setattr(self._barbg, "size", v))
+        bar.add_widget(_btn("목록", size_hint_x=None, width=dp(64), font_size=dp(14),
+                            background_normal="", background_color=(1, 1, 1, .22), color=(1, 1, 1, 1),
                             on_release=lambda *a: setattr(self.app.sm, "current", "home")))
         self.title = Label(text="", bold=True, font_size=dp(17), shorten=True,
-                           halign="center", valign="middle")
+                           halign="center", valign="middle", color=(1, 1, 1, 1))
         self.title.bind(size=self.title.setter("text_size"))
         bar.add_widget(self.title)
-        bar.add_widget(_btn("◀", size_hint_x=None, width=dp(52), font_size=dp(20),
+        bar.add_widget(_btn("◀", size_hint_x=None, width=dp(50), font_size=dp(20),
+                            background_normal="", background_color=(1, 1, 1, .22), color=(1, 1, 1, 1),
                             on_release=lambda *a: self.app.person_nav(-1)))
-        bar.add_widget(_btn("▶", size_hint_x=None, width=dp(52), font_size=dp(20),
+        bar.add_widget(_btn("▶", size_hint_x=None, width=dp(50), font_size=dp(20),
+                            background_normal="", background_color=(1, 1, 1, .22), color=(1, 1, 1, 1),
                             on_release=lambda *a: self.app.person_nav(1)))
         root.add_widget(bar)
-        # 요일 머리글
-        head = BoxLayout(size_hint_y=None, height=dp(26), padding=[dp(6), 0], spacing=dp(6))
-        h1 = Label(text="날짜", size_hint_x=None, width=dp(72), font_size=dp(12), color=(.5, .5, .5, 1))
-        head.add_widget(h1)
-        head.add_widget(Label(text="근무 (탭하여 수정 · 노랑=수기)", font_size=dp(12),
-                              color=(.5, .5, .5, 1), halign="left", valign="middle"))
-        root.add_widget(head)
-        self.scroll = make_scroll()
-        self.lst = GridLayout(cols=1, size_hint_y=None, spacing=dp(3), padding=[dp(4), dp(2)])
-        self.lst.bind(minimum_height=self.lst.setter("height"))
-        self.scroll.add_widget(self.lst)
-        root.add_widget(self.scroll)
+        # 월 집계 요약
+        self.summary = Label(text="", size_hint_y=None, height=dp(30), font_size=dp(13),
+                             color=(.3, .32, .4, 1), halign="center", valign="middle")
+        self.summary.bind(size=self.summary.setter("text_size"))
+        root.add_widget(self.summary)
+
+        self.rv = RecycleView(scroll_type=["content", "bars"], bar_width=dp(6),
+                              bar_color=(.4, .4, .45, .7))
+        rbl = RecycleBoxLayout(orientation="vertical", default_size=(None, dp(58)),
+                               default_size_hint=(1, None), size_hint_y=None, spacing=dp(3),
+                               padding=[dp(4), dp(3)])
+        rbl.bind(minimum_height=rbl.setter("height"))
+        self.rv.add_widget(rbl)
+        self.rv.viewclass = "DayRowRV"
+        root.add_widget(self.rv)
         self.add_widget(root)
 
     def load(self, person):
         self.person = person
         self.title.text = f"{person.name} · {person.team}"
         self.refresh()
-        self.scroll.scroll_y = 1  # 새 승무원은 맨 위부터
+        self.rv.scroll_y = 1  # 새 승무원은 맨 위부터
 
     def refresh(self):
-        self.lst.clear_widgets()
         wb = self.app.wb
         p = self.person
         wm = wb.grid.work_month
-        gcs = sorted(((gc, d) for gc, d in wb.grid.dates.items() if d.month == wm),
-                     key=lambda kv: kv[1])
-        for gc, d in gcs:
+        self.days = sorted(((gc, d) for gc, d in wb.grid.dates.items() if d.month == wm),
+                           key=lambda kv: kv[1])
+        data = []
+        n_work = n_s = n_edu = n_manual = 0
+        for i, (gc, d) in enumerate(self.days):
             v = core.effective_value(wb, p.row, gc)
             manual = wb.grid.is_manual.get((p.row, gc), False)
             hol = core.is_holiday(d, wb.holidays)
-            row = BoxLayout(size_hint_y=None, height=dp(54), spacing=dp(6), padding=[dp(2), 0])
-            dl = Label(text=f"{d.month}/{d.day}\n{WD[d.weekday()]}", size_hint_x=None, width=dp(72),
-                       halign="center", valign="middle", font_size=dp(14),
-                       color=(.78, .12, .12, 1) if hol else (.25, .25, .25, 1))
-            dl.bind(size=dl.setter("text_size"))
-            row.add_widget(dl)
-            cell = _btn(v or "-", font_size=dp(19), halign="center", valign="middle",
-                        background_normal="",
-                        background_color=(1, .9, .62, 1) if manual else (.92, .95, 1, 1),
-                        color=(.1, .1, .1, 1))
-            cell.bind(on_release=lambda inst, g=gc, dd=d: self.app.edit_cell(p, g, dd))
-            row.add_widget(cell)
-            self.lst.add_widget(row)
+            data.append({"date_text": f"{d.month}/{d.day}\n{WD[d.weekday()]}",
+                         "value": v or "-", "idx": i, "manual": bool(manual), "holiday": bool(hol)})
+            if manual:
+                n_manual += 1
+            if v == "S":
+                n_s += 1
+            elif v and ("교육" in v):
+                n_edu += 1
+            elif v and v not in ("-", ""):
+                n_work += 1
+        self.rv.data = data
+        self.summary.text = f"근무 {n_work} · S {n_s} · 교육 {n_edu} · 수기수정 {n_manual}"
 
 
 class StartScreen(Screen):
@@ -486,6 +593,17 @@ class RosterApp(App):
         self.person_scr.load(p)
         self.sm.current = "person"
 
+    def open_person_idx(self, idx):
+        order = getattr(self, "_order", [])
+        if 0 <= idx < len(order):
+            self.open_person(order[idx])
+
+    def edit_cell_idx(self, idx):
+        days = self.person_scr.days
+        if 0 <= idx < len(days):
+            gc, d = days[idx]
+            self.edit_cell(self.person_scr.person, gc, d)
+
     def person_nav(self, delta):
         """목록 순서대로 이전/다음 승무원으로 이동."""
         order = getattr(self, "_order", [])
@@ -502,18 +620,23 @@ class RosterApp(App):
         wb = self.wb
         cur = core.effective_value(wb, p.row, gc)
         manual = wb.grid.is_manual.get((p.row, gc), False)
+        plan = core.planned_diagram(p.start_seq, p.team,
+                                    d, _dt.date(wb.grid.year, wb.grid.start_month, 1),
+                                    wb.seqtables, wb.holidays) if d else ""
         wd = WD[d.weekday()]
         box = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(10))
         box.add_widget(Label(text=f"{p.name}  ·  {d.month}/{d.day} ({wd})", bold=True,
-                             size_hint_y=None, height=dp(34), font_size=dp(18)))
-        box.add_widget(Label(text=f"현재 {'수기수정' if manual else '계획값'}: [{cur or '-'}]",
-                             size_hint_y=None, height=dp(22), font_size=dp(13),
-                             color=(.45, .45, .45, 1)))
+                             size_hint_y=None, height=dp(32), font_size=dp(18),
+                             color=(.1, .12, .18, 1)))
+        box.add_widget(Label(text=f"계획값 [{plan or '-'}]   현재 [{cur or '-'}]"
+                                  f"{'  (수기)' if manual else ''}",
+                             size_hint_y=None, height=dp(20), font_size=dp(12.5),
+                             color=(.45, .45, .5, 1)))
         disp = TextInput(text=cur if manual else "", multiline=False,
-                         size_hint_y=None, height=dp(58), font_size=dp(26),
+                         size_hint_y=None, height=dp(56), font_size=dp(28),
                          halign="center", padding=[dp(8), dp(12), dp(8), dp(8)])
         box.add_widget(disp)
-        pop = Popup(title="근무 수정", content=box, size_hint=(.95, .92))
+        pop = Popup(title="근무 수정", content=box, size_hint=(.95, .9))
 
         def do_save(val):
             core.save_cell(wb, p.row, gc, (val or "").strip())
@@ -523,29 +646,32 @@ class RosterApp(App):
         def ins(c):
             disp.text = (disp.text or "") + c
 
-        # 숫자 키패드(다이아번호 빠른 입력)
-        pad = GridLayout(cols=3, size_hint_y=None, height=dp(216), spacing=dp(5))
+        # 숫자 키패드(가변 높이 → 작은 화면에서도 저장 버튼이 항상 보임)
+        pad = GridLayout(cols=3, size_hint_y=1, spacing=dp(5))
         for c in ["7", "8", "9", "4", "5", "6", "1", "2", "3"]:
-            pad.add_widget(_btn(c, font_size=dp(24), on_release=lambda i, ch=c: ins(ch)))
-        pad.add_widget(_btn("0", font_size=dp(24), on_release=lambda i: ins("0")))
-        pad.add_widget(_btn("지움", font_size=dp(17),
+            pad.add_widget(_btn(c, font_size=dp(26),
+                                on_release=lambda i, ch=c: ins(ch)))
+        pad.add_widget(_btn("0", font_size=dp(26), on_release=lambda i: ins("0")))
+        pad.add_widget(_btn("←지움", font_size=dp(17),
                             on_release=lambda i: setattr(disp, "text", (disp.text or "")[:-1])))
-        pad.add_widget(_btn("전체삭제", font_size=dp(15),
+        pad.add_widget(_btn("전체삭제", font_size=dp(14),
                             on_release=lambda i: setattr(disp, "text", "")))
         box.add_widget(pad)
 
         # 자주 쓰는 값 바로저장
-        q = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(5))
+        q = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(5))
         for label, val in [("S", "S"), ("교육", "교육"), ("계획복원", "")]:
-            q.add_widget(_btn(label, font_size=dp(16),
+            q.add_widget(_btn(label, font_size=dp(16), background_normal="",
+                              background_color=(.9, .93, .98, 1), color=(.15, .15, .2, 1),
                               on_release=lambda i, v=val: do_save(v)))
         box.add_widget(q)
 
-        act = BoxLayout(size_hint_y=None, height=dp(56), spacing=dp(6))
-        act.add_widget(_btn("저장", font_size=dp(19), background_normal="",
+        act = BoxLayout(size_hint_y=None, height=dp(58), spacing=dp(6))
+        act.add_widget(_btn("저장", font_size=dp(20), bold=True, background_normal="",
                             background_color=(.13, .5, .85, 1), color=(1, 1, 1, 1),
                             on_release=lambda i: do_save(disp.text)))
-        act.add_widget(_btn("닫기", size_hint_x=None, width=dp(100),
+        act.add_widget(_btn("닫기", size_hint_x=None, width=dp(96), background_normal="",
+                            background_color=(.8, .82, .86, 1), color=(.15, .15, .2, 1),
                             on_release=lambda i: pop.dismiss()))
         box.add_widget(act)
         pop.open()
