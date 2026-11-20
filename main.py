@@ -11,7 +11,7 @@ import datetime as _dt
 from kivy.config import Config
 Config.set("input", "mouse", "mouse,multitouch_on_demand")
 
-__version__ = "1.5"
+__version__ = "1.6"
 BUILD = __version__
 
 
@@ -35,6 +35,35 @@ def _crash_dirs():
     d += ["/sdcard/Download", "/storage/emulated/0/Download", "/sdcard",
           "/storage/emulated/0", os.path.dirname(os.path.abspath(__file__))]
     return d
+
+
+def _has_all_files():
+    """안드로이드 11+ '모든 파일 접근' 권한 보유 여부(폴더 자유 탐색에 필요)."""
+    try:
+        from jnius import autoclass
+        Environment = autoclass("android.os.Environment")
+        return bool(Environment.isExternalStorageManager())
+    except Exception:
+        return True  # 안드로이드가 아니거나 구버전이면 통과
+
+
+def _request_all_files():
+    """'모든 파일 접근' 허용 설정 화면을 연다."""
+    try:
+        from jnius import autoclass
+        Intent = autoclass("android.content.Intent")
+        Settings = autoclass("android.provider.Settings")
+        Uri = autoclass("android.net.Uri")
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        act = PythonActivity.mActivity
+        try:
+            intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+            intent.setData(Uri.parse("package:" + act.getPackageName()))
+            act.startActivity(intent)
+        except Exception:
+            act.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+    except Exception:
+        pass
 
 
 def _write_crash(msg):
@@ -306,64 +335,109 @@ class RosterApp(App):
             self._err_shown = True
             Clock.schedule_once(_do, 0)
 
-    def _req_perms(self):
-        try:
-            from android.permissions import request_permissions, Permission
-            request_permissions([Permission.READ_EXTERNAL_STORAGE,
-                                 Permission.WRITE_EXTERNAL_STORAGE])
-        except Exception:
-            pass
-
-    def _find_dbs(self):
-        """폰 내 .db 후보 목록(앱폴더/다운로드/저장소)."""
-        bases = []
-        a = _android_app_dir()
-        if a:
-            bases.append(a)
-        bases += ["/sdcard/Download", "/storage/emulated/0/Download",
-                  "/sdcard", "/storage/emulated/0",
-                  os.path.dirname(os.path.abspath(__file__))]
-        seen, out = set(), []
-        for b in bases:
-            try:
-                for f in sorted(os.listdir(b)):
-                    if f.lower().endswith(".db"):
-                        p = os.path.join(b, f)
-                        if p not in seen:
-                            seen.add(p)
-                            out.append(p)
-            except Exception:
-                continue
-        return out
-
+    # ---------------------------------------------------------------- 권한
     def pick_db(self):
-        # 파일 접근 권한은 이 시점에 요청(시작 시 팝업으로 인한 재개 크래시 회피)
-        self._req_perms()
-        dbs = self._find_dbs()
-        appdir = _android_app_dir() or "(앱 폴더)"
-        box = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(10))
-        if not dbs:
-            box.add_widget(Label(
-                text="폰에서 .db 파일을 찾지 못했습니다.\n\n"
-                     "PC의 .db 파일을 폰의 [b]Download[/b] 폴더(또는 아래 앱 폴더)에\n"
-                     "복사한 뒤 다시 'DB 열기'를 누르세요.\n\n"
-                     f"[size=11sp]{appdir}[/size]",
-                markup=True, halign="center"))
-        else:
-            box.add_widget(Label(text="열 DB를 선택하세요", size_hint_y=None, height=dp(28), bold=True))
-            sc = ScrollView()
-            lst = GridLayout(cols=1, size_hint_y=None, spacing=dp(3))
-            lst.bind(minimum_height=lst.setter("height"))
-            for p in dbs:
-                b = _btn(os.path.basename(p), size_hint_y=None, height=dp(44))
-                b.bind(on_release=lambda inst, pp=p: (pop.dismiss(), self.load_db(pp)))
-                lst.add_widget(b)
-            sc.add_widget(lst)
-            box.add_widget(sc)
-        box.add_widget(_btn("닫기", size_hint_y=None, height=dp(44),
-                            on_release=lambda *a: pop.dismiss()))
-        pop = Popup(title="DB 선택", content=box, size_hint=(.92, .8))
+        """DB 열기: 권한 확인 후 폴더 탐색기 표시."""
+        if platform == "android" and not _has_all_files():
+            self._perm_dialog()
+            return
+        self.open_browser()
+
+    def _perm_dialog(self):
+        box = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(14))
+        box.add_widget(Label(
+            text="폴더를 탐색하려면 [b]모든 파일 접근[/b] 권한이 필요합니다.\n\n"
+                 "아래 '권한 설정 열기'를 누른 뒤\n"
+                 "[b]교번 모바일[/b] 항목을 [b]허용[/b]으로 켜고\n"
+                 "뒤로가기로 돌아와 다시 'DB 열기'를 누르세요.",
+            markup=True, halign="center"))
+        br = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(8))
+        br.add_widget(_btn("권한 설정 열기",
+                           on_release=lambda *a: (pop.dismiss(), _request_all_files())))
+        br.add_widget(_btn("닫기", on_release=lambda *a: pop.dismiss()))
+        box.add_widget(br)
+        pop = Popup(title="권한 필요", content=box, size_hint=(.9, None), height=dp(320))
         pop.open()
+
+    # ---------------------------------------------------------------- 폴더 탐색기
+    def _default_root(self):
+        for d in ("/storage/emulated/0", "/sdcard"):
+            if os.path.isdir(d):
+                return d
+        return os.path.dirname(os.path.abspath(__file__))
+
+    def open_browser(self, start=None):
+        self._browse_dir = start or getattr(self, "_last_dir", None) or self._default_root()
+        self._browse_pop = Popup(title="DB 파일 선택", size_hint=(.96, .9))
+        self._render_browser()
+        self._browse_pop.open()
+
+    def _browse_into(self, name):
+        self._browse_dir = os.path.join(self._browse_dir, name)
+        self._render_browser()
+
+    def _browse_up(self):
+        parent = os.path.dirname(self._browse_dir.rstrip("/"))
+        if parent and os.path.isdir(parent):
+            self._browse_dir = parent
+            self._render_browser()
+
+    def _render_browser(self):
+        d = self._browse_dir
+        box = BoxLayout(orientation="vertical", spacing=dp(4), padding=dp(8))
+        top = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(6))
+        top.add_widget(_btn("위로", size_hint_x=None, width=dp(72),
+                            on_release=lambda *a: self._browse_up()))
+        pl = Label(text=d, shorten=True, halign="left", valign="middle", font_size=dp(12),
+                   color=(.2, .2, .2, 1))
+        pl.bind(size=pl.setter("text_size"))
+        top.add_widget(pl)
+        box.add_widget(top)
+
+        sc = ScrollView()
+        lst = GridLayout(cols=1, size_hint_y=None, spacing=dp(2))
+        lst.bind(minimum_height=lst.setter("height"))
+        try:
+            entries = sorted(os.listdir(d), key=lambda s: s.lower())
+            folders = [e for e in entries if os.path.isdir(os.path.join(d, e)) and not e.startswith(".")]
+            dbs = [e for e in entries if e.lower().endswith(".db")]
+            for fo in folders:
+                b = _btn("[폴더] " + fo, size_hint_y=None, height=dp(46), halign="left",
+                         background_normal="", background_color=(.92, .95, 1, 1), color=(.1, .1, .1, 1))
+                b.bind(size=lambda i, s: setattr(i, "text_size", (i.width - dp(20), None)))
+                b.bind(on_release=lambda inst, n=fo: self._browse_into(n))
+                lst.add_widget(b)
+            for fi in dbs:
+                full = os.path.join(d, fi)
+                b = _btn("[DB] " + fi, size_hint_y=None, height=dp(48), halign="left",
+                         background_normal="", background_color=(1, .93, .75, 1), color=(.1, .1, .1, 1))
+                b.bind(size=lambda i, s: setattr(i, "text_size", (i.width - dp(20), None)))
+                b.bind(on_release=lambda inst, p=full: (
+                    setattr(self, "_last_dir", d), self._browse_pop.dismiss(), self.load_db(p)))
+                lst.add_widget(b)
+            if not folders and not dbs:
+                lst.add_widget(Label(text="(이 폴더에 폴더나 .db 파일이 없습니다)",
+                                     size_hint_y=None, height=dp(40), color=(.5, .5, .5, 1)))
+        except Exception as e:
+            lst.add_widget(Label(
+                text=f"폴더를 열 수 없습니다.\n'모든 파일 접근' 권한을 확인하세요.\n\n{e}",
+                size_hint_y=None, height=dp(120), halign="center"))
+        sc.add_widget(lst)
+        box.add_widget(sc)
+
+        bottom = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(6))
+        bottom.add_widget(_btn("다운로드 폴더", size_hint_x=None, width=dp(130),
+                               on_release=lambda *a: self._goto_download()))
+        bottom.add_widget(_btn("닫기", on_release=lambda *a: self._browse_pop.dismiss()))
+        box.add_widget(bottom)
+        self._browse_pop.content = box
+
+    def _goto_download(self):
+        for d in ("/storage/emulated/0/Download", "/sdcard/Download"):
+            if os.path.isdir(d):
+                self._browse_dir = d
+                break
+        self._render_browser()
 
     def load_db(self, path):
         try:

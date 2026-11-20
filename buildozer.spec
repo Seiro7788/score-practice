@@ -16,7 +16,7 @@ requirements = python3,kivy==2.3.1
 p4a.branch = develop
 orientation = portrait
 fullscreen = 0
-android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
+android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE
 android.api = 34
 android.minapi = 24
 android.ndk = 28c
