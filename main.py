@@ -6,7 +6,7 @@
 이 화면이 뜨면 => 기기/빌드는 정상, 문제는 앱 UI(폰트/화면전환 등)에 있음.
 이것도 튕기면 => 그래픽/빌드(기기) 레벨 문제로 확정.
 """
-__version__ = "1.3"
+__version__ = "1.4"
 
 import os
 import sys
@@ -37,7 +37,7 @@ from kivy.uix.label import Label
 
 class RosterApp(App):
     def build(self):
-        return Label(text="crewroster 1.3\nbase render OK\n(tap back to exit)",
+        return Label(text="crewroster 1.4 16KB-NDK test\nbase render OK",
                      halign="center", valign="middle")
 
 

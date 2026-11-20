@@ -9,17 +9,17 @@ source.include_patterns = assets/*
 version.regex = __version__\s*=\s*['"]([^'"]*)['"]
 version.filename = %(source.dir)s/main.py
 requirements = python3,kivy==2.3.1
-# p4a v2024.01.21: 의존성 자동해석(charset_normalizer native wheel 실패의 원인)과
-# libthorvg 레시피(NDK 25b 와 경로 불일치로 IndexError) 둘 다 없는 안정 릴리스.
-# Kivy 레시피는 체크섬 없는 zip 이라 kivy==2.3.1 로 안전하게 오버라이드되고,
-# 2.3.0 전용 패치는 2.3.1 에 적용되지 않음. NDK 권장도 25b 로 일치.
-p4a.branch = v2024.01.21
+# p4a develop + NDK 28c: 최신 안드로이드(갤S25 등)는 16KB 메모리 페이지를 쓰며,
+# NDK r25b 가 만든 4KB 정렬 .so 는 로드가 거부되어 실행 직후 튕긴다. NDK r27+ 는
+# 16KB 정렬을 기본으로 하므로 로드된다. develop 는 libthorvg 레시피의 clang 경로를
+# NDK 28 에서 올바르게 찾는다(구 NDK25 의 lib64/clang 불일치 문제 없음).
+p4a.branch = develop
 orientation = portrait
 fullscreen = 0
 android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
 android.api = 34
 android.minapi = 24
-android.ndk = 25b
+android.ndk = 28c
 android.archs = arm64-v8a
 android.accept_sdk_license = True
 android.allow_backup = 1
