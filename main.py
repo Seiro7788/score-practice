@@ -11,7 +11,7 @@ import datetime as _dt
 from kivy.config import Config
 Config.set("input", "mouse", "mouse,multitouch_on_demand")
 
-__version__ = "1.1"
+__version__ = "1.2"
 BUILD = __version__
 
 
