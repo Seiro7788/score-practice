@@ -1,7 +1,9 @@
 [app]
 title = 교번 모바일
 package.name = crewroster
-package.domain = com.smartrain.crewroster
+package.domain = com.smartrain7788
+# versionCode: 업데이트가 덮어써지려면 이전 값보다 작으면 안 됨. 버전업마다 +1.
+android.numeric_version = 107
 source.dir = .
 source.include_exts = py,ttf,db
 source.include_patterns = assets/*

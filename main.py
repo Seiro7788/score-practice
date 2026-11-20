@@ -163,6 +163,11 @@ class HomeScreen(Screen):
         self.lst.bind(minimum_height=self.lst.setter("height"))
         sc.add_widget(self.lst)
         root.add_widget(sc)
+
+        foot = Label(text=f"교번 모바일 {__version__}  ·  제작 smartrain7788",
+                     size_hint_y=None, height=dp(22), font_size=dp(11),
+                     color=(.55, .55, .55, 1))
+        root.add_widget(foot)
         self.add_widget(root)
 
     def refresh(self):
