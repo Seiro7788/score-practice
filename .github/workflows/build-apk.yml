@@ -44,6 +44,15 @@ jobs:
             .buildozer
           key: buildozer-${{ hashFiles('buildozer.spec') }}
 
+      # 캐시 key(hashFiles)는 위 Cache 단계에서 이미 평가됨 → 여기서 spec 을 고쳐도
+      # 캐시는 적중. versionCode 를 run_number 로 매 빌드 증가시켜 '더 새 버전'으로
+      # 인식되게 함(같은 versionCode 로는 삼성 설치관리자가 덮어쓰기를 거부).
+      - name: Bump versionCode (monotonic)
+        run: |
+          VC=$((10000 + ${{ github.run_number }}))
+          sed -i "s/^android.numeric_version = .*/android.numeric_version = ${VC}/" buildozer.spec
+          echo "versionCode = ${VC}"
+
       - name: Use fixed debug keystore (consistent signature → in-place updates)
         run: |
           mkdir -p ~/.android

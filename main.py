@@ -11,7 +11,7 @@ import datetime as _dt
 from kivy.config import Config
 Config.set("input", "mouse", "mouse,multitouch_on_demand")
 
-__version__ = "1.8"
+__version__ = "1.9"
 BUILD = __version__
 
 
@@ -230,12 +230,16 @@ class HomeScreen(Screen):
         root.bind(pos=lambda w, v: setattr(self._bgr, "pos", v),
                   size=lambda w, v: setattr(self._bgr, "size", v))
 
-        bar = BoxLayout(size_hint_y=None, height=dp(56), padding=[dp(10), dp(6)], spacing=dp(8))
+        bar = BoxLayout(size_hint_y=None, height=dp(56), padding=[dp(10), dp(6)], spacing=dp(6))
         self.path_lbl = Label(text="DB를 여세요", shorten=True, halign="left", valign="middle",
-                              bold=True, font_size=dp(16), color=(.12, .14, .2, 1))
+                              bold=True, font_size=dp(15), color=(.12, .14, .2, 1))
         self.path_lbl.bind(size=self.path_lbl.setter("text_size"))
         bar.add_widget(self.path_lbl)
-        bar.add_widget(_btn("DB 열기", size_hint_x=None, width=dp(104), font_size=dp(15),
+        self.save_btn = _btn("전체저장", size_hint_x=None, width=dp(104), font_size=dp(14),
+                             bold=True, background_normal="", background_color=(.55, .58, .62, 1),
+                             color=(1, 1, 1, 1), on_release=lambda *a: self.app.commit_pending())
+        bar.add_widget(self.save_btn)
+        bar.add_widget(_btn("DB 열기", size_hint_x=None, width=dp(92), font_size=dp(14),
                             background_normal="", background_color=NAVY, color=(1, 1, 1, 1),
                             on_release=lambda *a: self.app.pick_db()))
         root.add_widget(bar)
@@ -329,6 +333,13 @@ class PersonScreen(Screen):
         self.rv.add_widget(rbl)
         self.rv.viewclass = "DayRowRV"
         root.add_widget(self.rv)
+
+        savebar = BoxLayout(size_hint_y=None, height=dp(60), padding=[dp(8), dp(6)], spacing=dp(6))
+        self.save_btn = _btn("전체저장", font_size=dp(18), bold=True, background_normal="",
+                             background_color=(.55, .58, .62, 1), color=(1, 1, 1, 1),
+                             on_release=lambda *a: self.app.commit_pending())
+        savebar.add_widget(self.save_btn)
+        root.add_widget(savebar)
         self.add_widget(root)
 
     def load(self, person):
@@ -419,6 +430,7 @@ class RosterApp(App):
 
     def _build(self):
         self.wb = None
+        self.pending = {}          # {(person_row, col): text} — 아직 DB 미기록
         self._err_shown = False
         self._entered = True
         self.sm = ScreenManager()
@@ -579,8 +591,16 @@ class RosterApp(App):
         self._render_browser()
 
     def load_db(self, path):
+        if self.pending:
+            self._confirm_discard(lambda: self._do_load(path))
+        else:
+            self._do_load(path)
+
+    def _do_load(self, path):
         try:
             self.wb, meta = core.load(path)
+            self.pending = {}
+            self._refresh_save_ui()
             self.home.path_lbl.text = os.path.basename(path)
             self.home.refresh()
             self._toast(f"{os.path.basename(path)} 열림 ({len(self.wb.persons)}명)")
@@ -588,6 +608,53 @@ class RosterApp(App):
             msg = traceback.format_exc()
             _write_crash(msg)
             self.show_error(msg)
+
+    def _confirm_discard(self, proceed):
+        box = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(14))
+        box.add_widget(Label(text=f"저장하지 않은 변경 {len(self.pending)}건이 있습니다.\n"
+                                  "먼저 전체저장할까요?", halign="center"))
+        br = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(6))
+        br.add_widget(_btn("전체저장 후 진행", background_normal="",
+                           background_color=(.13, .5, .85, 1), color=(1, 1, 1, 1),
+                           on_release=lambda *a: (pop.dismiss(), self.commit_pending(), proceed())))
+        br.add_widget(_btn("저장않고 진행",
+                           on_release=lambda *a: (pop.dismiss(), proceed())))
+        box.add_widget(br)
+        box.add_widget(_btn("취소", size_hint_y=None, height=dp(44),
+                            on_release=lambda *a: pop.dismiss()))
+        pop = Popup(title="저장하지 않은 변경", content=box, size_hint=(.9, None), height=dp(300))
+        pop.open()
+
+    # ---------------------------------------------------------------- 임시편집 / 전체저장
+    def record_edit(self, person_row, col, text):
+        """셀 편집을 메모리에만 반영하고 전체저장 대기열에 등록(DB 미기록)."""
+        text = (text or "").strip()
+        core.apply_cell(self.wb, person_row, col, text)
+        self.pending[(person_row, col)] = text
+        self._refresh_save_ui()
+
+    def commit_pending(self):
+        """대기 중인 모든 편집분을 DB 에 한 번에 기록."""
+        if not self.pending:
+            self._toast("저장할 변경사항이 없습니다")
+            return
+        try:
+            n = core.commit_all(self.wb, self.pending)
+            self.pending = {}
+            self._refresh_save_ui()
+            self._toast(f"{n}건을 DB에 저장했습니다")
+        except Exception:
+            msg = traceback.format_exc()
+            _write_crash(msg)
+            self.show_error(msg)
+
+    def _refresh_save_ui(self):
+        n = len(self.pending)
+        for scr in (getattr(self, "home", None), getattr(self, "person_scr", None)):
+            btn = getattr(scr, "save_btn", None)
+            if btn:
+                btn.text = f"전체저장 ({n})" if n else "전체저장"
+                btn.background_color = (.9, .36, .13, 1) if n else (.55, .58, .62, 1)
 
     def open_person(self, p):
         self.person_scr.load(p)
@@ -636,10 +703,10 @@ class RosterApp(App):
                          size_hint_y=None, height=dp(56), font_size=dp(28),
                          halign="center", padding=[dp(8), dp(12), dp(8), dp(8)])
         box.add_widget(disp)
-        pop = Popup(title="근무 수정", content=box, size_hint=(.95, .9))
+        pop = Popup(title="근무 수정 (임시)", content=box, size_hint=(.95, .9))
 
         def do_save(val):
-            core.save_cell(wb, p.row, gc, (val or "").strip())
+            self.record_edit(p.row, gc, (val or "").strip())  # 메모리만 — 전체저장 전까지 DB 미기록
             pop.dismiss()
             self.person_scr.refresh()
 
@@ -667,7 +734,7 @@ class RosterApp(App):
         box.add_widget(q)
 
         act = BoxLayout(size_hint_y=None, height=dp(58), spacing=dp(6))
-        act.add_widget(_btn("저장", font_size=dp(20), bold=True, background_normal="",
+        act.add_widget(_btn("적용", font_size=dp(20), bold=True, background_normal="",
                             background_color=(.13, .5, .85, 1), color=(1, 1, 1, 1),
                             on_release=lambda i: do_save(disp.text)))
         act.add_widget(_btn("닫기", size_hint_x=None, width=dp(96), background_normal="",

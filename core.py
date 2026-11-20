@@ -295,24 +295,41 @@ def effective_value(wb, person_row, col, _depth=0):
 
 
 # ------------------------------------------------------------------ 저장(수기 셀)
-def save_cell(wb, person_row, col, text):
-    """작업양식 셀 수기 저장(메모리+DB). text='' 면 계획 복원(수식)."""
+def apply_cell(wb, person_row, col, text):
+    """메모리에만 반영(DB 미기록). text='' 면 계획 복원. 전체저장 전 임시 편집용."""
     key = (person_row, col)
     text = (text or "").strip()
+    if text == "":
+        wb.grid.is_manual[key] = False
+        wb.grid.values[key] = ""
+    else:
+        wb.grid.is_manual[key] = True
+        wb.grid.values[key] = text
+
+
+def commit_all(wb, changes):
+    """메모리의 편집분(changes: {(row,col): text})을 DB 에 한 번에 기록."""
+    if not changes:
+        return 0
     con = sqlite3.connect(wb.db_path)
     try:
-        if text == "":
-            wb.grid.is_manual[key] = False
-            wb.grid.values[key] = ""
-            con.execute("INSERT OR REPLACE INTO sheet_cells(sheet,row,col,enc,isf) "
-                        "VALUES('작업양식',?,?,?,1)", (person_row, col, _enc("")))
-        else:
-            wb.grid.is_manual[key] = True
-            wb.grid.values[key] = text
-            con.execute("INSERT OR REPLACE INTO sheet_cells(sheet,row,col,enc,isf) "
-                        "VALUES('작업양식',?,?,?,0)", (person_row, col, _enc(text)))
+        for (person_row, col), text in changes.items():
+            text = (text or "").strip()
+            if text == "":
+                con.execute("INSERT OR REPLACE INTO sheet_cells(sheet,row,col,enc,isf) "
+                            "VALUES('작업양식',?,?,?,1)", (person_row, col, _enc("")))
+            else:
+                con.execute("INSERT OR REPLACE INTO sheet_cells(sheet,row,col,enc,isf) "
+                            "VALUES('작업양식',?,?,?,0)", (person_row, col, _enc(text)))
         con.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('updated_utc',?)",
                     (_dt.datetime.now().isoformat(timespec="seconds"),))
         con.commit()
     finally:
         con.close()
+    return len(changes)
+
+
+def save_cell(wb, person_row, col, text):
+    """작업양식 셀 수기 저장(메모리+DB 즉시). text='' 면 계획 복원(수식)."""
+    apply_cell(wb, person_row, col, text)
+    commit_all(wb, {(person_row, col): (text or "").strip()})
