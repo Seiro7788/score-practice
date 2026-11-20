@@ -11,7 +11,7 @@ import datetime as _dt
 from kivy.config import Config
 Config.set("input", "mouse", "mouse,multitouch_on_demand")
 
-__version__ = "2.0"
+__version__ = "2.1"
 BUILD = __version__
 
 
@@ -235,19 +235,19 @@ class GridRowRV(RecycleDataViewBehavior, BoxLayout):
                               shorten=True)
         self.name_lbl.bind(size=self.name_lbl.setter("text_size"))
         self.add_widget(self.name_lbl)
-        self.cells = []
+        self._cellbtns = []   # 'cells' 는 data 키와 충돌하므로 다른 이름 사용
         for i in range(GRID_COLS):
             b = Button(size_hint_x=None, width=dp(GRID_CELLW), font_size=dp(14),
                        background_normal="", background_down="", color=(.1, .1, .14, 1))
             b.bind(on_release=lambda inst, ci=i: App.get_running_app().grid_edit(self.index, ci))
-            self.cells.append(b)
+            self._cellbtns.append(b)
             self.add_widget(b)
 
     def refresh_view_attrs(self, rv, index, data):
         self.index = index
         self.name_lbl.text = data["name"]
         cells = data["cells"]
-        for i, b in enumerate(self.cells):
+        for i, b in enumerate(self._cellbtns):
             if i < len(cells):
                 val, manual = cells[i]
                 b.text = val or "-"
