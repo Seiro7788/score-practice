@@ -11,7 +11,7 @@ import datetime as _dt
 from kivy.config import Config
 Config.set("input", "mouse", "mouse,multitouch_on_demand")
 
-__version__ = "1.9"
+__version__ = "2.0"
 BUILD = __version__
 
 
@@ -99,6 +99,7 @@ from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.recycleview import RecycleView
 from kivy.uix.recycleboxlayout import RecycleBoxLayout
+from kivy.uix.recycleview.views import RecycleDataViewBehavior
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.properties import StringProperty, NumericProperty, BooleanProperty
 from kivy.lang import Builder
@@ -217,6 +218,152 @@ Builder.load_string("""
         on_release: app.edit_cell_idx(root.idx)
 """)
 
+GRID_COLS = 7     # 한 페이지(주)에 보여줄 날짜 수
+GRID_NAMEW = 74   # 이름 칸 너비(dp)
+GRID_CELLW = 42   # 셀 너비(dp)
+
+
+class GridRowRV(RecycleDataViewBehavior, BoxLayout):
+    """전체보기 한 행: 이름(고정) + 그 주의 날짜 셀들."""
+    index = -1
+
+    def __init__(self, **kw):
+        super().__init__(orientation="horizontal", size_hint_y=None, height=dp(44),
+                         spacing=dp(2), **kw)
+        self.name_lbl = Label(size_hint_x=None, width=dp(GRID_NAMEW), halign="left",
+                              valign="middle", font_size=dp(13), color=(.12, .14, .2, 1),
+                              shorten=True)
+        self.name_lbl.bind(size=self.name_lbl.setter("text_size"))
+        self.add_widget(self.name_lbl)
+        self.cells = []
+        for i in range(GRID_COLS):
+            b = Button(size_hint_x=None, width=dp(GRID_CELLW), font_size=dp(14),
+                       background_normal="", background_down="", color=(.1, .1, .14, 1))
+            b.bind(on_release=lambda inst, ci=i: App.get_running_app().grid_edit(self.index, ci))
+            self.cells.append(b)
+            self.add_widget(b)
+
+    def refresh_view_attrs(self, rv, index, data):
+        self.index = index
+        self.name_lbl.text = data["name"]
+        cells = data["cells"]
+        for i, b in enumerate(self.cells):
+            if i < len(cells):
+                val, manual = cells[i]
+                b.text = val or "-"
+                b.background_color = (1, .86, .5, 1) if manual else (.93, .96, 1, 1)
+                b.disabled = False
+                b.opacity = 1
+            else:
+                b.text = ""
+                b.disabled = True
+                b.opacity = 0
+        return super().refresh_view_attrs(rv, index, data)
+
+
+class GridScreen(Screen):
+    def __init__(self, app, **kw):
+        super().__init__(**kw)
+        self.app = app
+        self.page = 0          # 주 페이지
+        self.weeks = []        # [[(gc,d)..7], ...]
+        self.persons = []
+        root = BoxLayout(orientation="vertical")
+        bar = BoxLayout(size_hint_y=None, height=dp(54), padding=[dp(6), dp(5)], spacing=dp(5))
+        with bar.canvas.before:
+            from kivy.graphics import Color, Rectangle
+            Color(*NAVY)
+            self._barbg = Rectangle(pos=bar.pos, size=bar.size)
+        bar.bind(pos=lambda w, v: setattr(self._barbg, "pos", v),
+                 size=lambda w, v: setattr(self._barbg, "size", v))
+        bar.add_widget(_btn("목록", size_hint_x=None, width=dp(62), font_size=dp(14),
+                            background_normal="", background_color=(1, 1, 1, .22), color=(1, 1, 1, 1),
+                            on_release=lambda *a: setattr(self.app.sm, "current", "home")))
+        bar.add_widget(Label(text="전체보기", bold=True, font_size=dp(17), color=(1, 1, 1, 1)))
+        self.save_btn = _btn("전체저장", size_hint_x=None, width=dp(108), font_size=dp(14), bold=True,
+                             background_normal="", background_color=(.55, .58, .62, 1), color=(1, 1, 1, 1),
+                             on_release=lambda *a: self.app.commit_pending())
+        bar.add_widget(self.save_btn)
+        root.add_widget(bar)
+        # 주 이동
+        wk = BoxLayout(size_hint_y=None, height=dp(42), padding=[dp(6), dp(2)], spacing=dp(6))
+        wk.add_widget(_btn("◀ 이전주", size_hint_x=None, width=dp(96), font_size=dp(14),
+                           on_release=lambda *a: self.go_week(-1)))
+        self.wk_lbl = Label(text="", font_size=dp(14), color=(.2, .22, .3, 1))
+        wk.add_widget(self.wk_lbl)
+        wk.add_widget(_btn("다음주 ▶", size_hint_x=None, width=dp(96), font_size=dp(14),
+                           on_release=lambda *a: self.go_week(1)))
+        root.add_widget(wk)
+        # 날짜 머리글
+        self.head = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(2), padding=[dp(6), 0])
+        root.add_widget(self.head)
+        # 본문(세로 가상 스크롤)
+        self.rv = RecycleView(scroll_type=["content", "bars"], bar_width=dp(6),
+                              bar_color=(.4, .4, .45, .7))
+        rbl = RecycleBoxLayout(orientation="vertical", default_size=(None, dp(44)),
+                               default_size_hint=(1, None), size_hint_y=None, spacing=dp(2),
+                               padding=[dp(6), dp(3)])
+        rbl.bind(minimum_height=rbl.setter("height"))
+        self.rv.add_widget(rbl)
+        self.rv.viewclass = "GridRowRV"
+        root.add_widget(self.rv)
+        self.add_widget(root)
+
+    def open(self):
+        wb = self.app.wb
+        if not wb:
+            return
+        wm = wb.grid.work_month
+        days = sorted(((gc, d) for gc, d in wb.grid.dates.items() if d.month == wm),
+                      key=lambda kv: kv[1])
+        self.weeks = [days[i:i + GRID_COLS] for i in range(0, len(days), GRID_COLS)] or [[]]
+        self.persons = list(getattr(self.app, "_order", []))
+        if not self.persons:
+            self.persons = [wb.row_person[r] for r in wb.grid.person_rows
+                            if r in wb.row_person and wb.row_person[r].name]
+        self.page = min(self.page, len(self.weeks) - 1)
+        self.refresh()
+
+    def go_week(self, delta):
+        self.page = max(0, min(self.page + delta, len(self.weeks) - 1))
+        self.refresh()
+
+    def cur_days(self):
+        return self.weeks[self.page] if self.weeks else []
+
+    def refresh(self):
+        wb = self.app.wb
+        days = self.cur_days()
+        # 머리글
+        self.head.clear_widgets()
+        self.head.add_widget(Label(size_hint_x=None, width=dp(GRID_NAMEW), text="이름",
+                                   font_size=dp(12), color=(.5, .5, .55, 1)))
+        for gc, d in days:
+            hol = core.is_holiday(d, wb.holidays)
+            self.head.add_widget(Label(size_hint_x=None, width=dp(GRID_CELLW),
+                                       text=f"{d.day}\n{WD[d.weekday()]}", font_size=dp(12),
+                                       halign="center", valign="middle",
+                                       color=(.82, .12, .12, 1) if hol else (.3, .32, .4, 1)))
+        if days:
+            d0, d1 = days[0][1], days[-1][1]
+            self.wk_lbl.text = f"{d0.month}/{d0.day} ~ {d1.month}/{d1.day}  ({self.page+1}/{len(self.weeks)}주)"
+        # 데이터
+        data = []
+        for p in self.persons:
+            cells = []
+            for gc, d in days:
+                v = core.effective_value(wb, p.row, gc)
+                manual = wb.grid.is_manual.get((p.row, gc), False)
+                cells.append((v, bool(manual)))
+            data.append({"name": f"{p.name}", "cells": cells})
+        self.rv.data = data
+
+    def grid_edit_target(self, row_idx, col_idx):
+        days = self.cur_days()
+        if 0 <= row_idx < len(self.persons) and 0 <= col_idx < len(days):
+            return self.persons[row_idx], days[col_idx][0], days[col_idx][1]
+        return None
+
 
 class HomeScreen(Screen):
     def __init__(self, app, **kw):
@@ -250,6 +397,9 @@ class HomeScreen(Screen):
                                 padding=[dp(10), dp(10)])
         self.search.bind(text=lambda *a: self.refresh())
         sb.add_widget(self.search)
+        sb.add_widget(_btn("전체보기", size_hint_x=None, width=dp(96), font_size=dp(14),
+                           background_normal="", background_color=(.18, .45, .35, 1), color=(1, 1, 1, 1),
+                           on_release=lambda *a: self.app.open_grid()))
         root.add_widget(sb)
 
         self.info = Label(text=f"{BUILD} · 로드 완료", size_hint_y=None, height=dp(22),
@@ -436,9 +586,11 @@ class RosterApp(App):
         self.sm = ScreenManager()
         self.home = HomeScreen(self, name="home")
         self.person_scr = PersonScreen(self, name="person")
+        self.grid_scr = GridScreen(self, name="grid")
         self.err_scr = ErrorScreen(name="error")
         self.sm.add_widget(self.home)
         self.sm.add_widget(self.person_scr)
+        self.sm.add_widget(self.grid_scr)
         self.sm.add_widget(self.err_scr)
         self.sm.current = "home"
         if not _FONT_OK:
@@ -650,11 +802,25 @@ class RosterApp(App):
 
     def _refresh_save_ui(self):
         n = len(self.pending)
-        for scr in (getattr(self, "home", None), getattr(self, "person_scr", None)):
+        for scr in (getattr(self, "home", None), getattr(self, "person_scr", None),
+                    getattr(self, "grid_scr", None)):
             btn = getattr(scr, "save_btn", None)
             if btn:
                 btn.text = f"전체저장 ({n})" if n else "전체저장"
                 btn.background_color = (.9, .36, .13, 1) if n else (.55, .58, .62, 1)
+
+    def open_grid(self):
+        if not self.wb:
+            self._toast("먼저 DB를 여세요")
+            return
+        self.grid_scr.open()
+        self.sm.current = "grid"
+
+    def grid_edit(self, row_idx, col_idx):
+        tgt = self.grid_scr.grid_edit_target(row_idx, col_idx)
+        if tgt:
+            p, gc, d = tgt
+            self.edit_cell(p, gc, d, after=self.grid_scr.refresh)
 
     def open_person(self, p):
         self.person_scr.load(p)
@@ -683,7 +849,7 @@ class RosterApp(App):
         if 0 <= j < len(order):
             self.person_scr.load(order[j])
 
-    def edit_cell(self, p, gc, d):
+    def edit_cell(self, p, gc, d, after=None):
         wb = self.wb
         cur = core.effective_value(wb, p.row, gc)
         manual = wb.grid.is_manual.get((p.row, gc), False)
@@ -708,7 +874,7 @@ class RosterApp(App):
         def do_save(val):
             self.record_edit(p.row, gc, (val or "").strip())  # 메모리만 — 전체저장 전까지 DB 미기록
             pop.dismiss()
-            self.person_scr.refresh()
+            (after or self.person_scr.refresh)()
 
         def ins(c):
             disp.text = (disp.text or "") + c
