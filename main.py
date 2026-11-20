@@ -11,7 +11,7 @@ import datetime as _dt
 from kivy.config import Config
 Config.set("input", "mouse", "mouse,multitouch_on_demand")
 
-__version__ = "1.6"
+__version__ = "1.7"
 BUILD = __version__
 
 
@@ -122,6 +122,14 @@ def _btn(text, **kw):
     return b
 
 
+def make_scroll():
+    """버튼이 많은 목록에서도 스크롤 제스처가 잘 잡히도록 튜닝한 ScrollView."""
+    return ScrollView(do_scroll_x=False, scroll_type=["content", "bars"],
+                      bar_width=dp(6), bar_color=(.45, .45, .45, .7),
+                      bar_inactive_color=(.45, .45, .45, .25),
+                      scroll_distance=dp(10), scroll_timeout=220)
+
+
 class Row(Button):
     pass
 
@@ -150,8 +158,8 @@ class HomeScreen(Screen):
                           color=(.4, .4, .4, 1), font_size=dp(12))
         root.add_widget(self.info)
 
-        sc = ScrollView()
-        self.lst = GridLayout(cols=1, size_hint_y=None, spacing=dp(2), padding=dp(4))
+        sc = make_scroll()
+        self.lst = GridLayout(cols=1, size_hint_y=None, spacing=dp(3), padding=dp(4))
         self.lst.bind(minimum_height=self.lst.setter("height"))
         sc.add_widget(self.lst)
         root.add_widget(sc)
@@ -168,9 +176,11 @@ class HomeScreen(Screen):
         if q:
             persons = [p for p in persons if q in p.name or q in str(p.emp_no)]
         self.info.text = f"{len(persons)}명 · {wb.grid.work_month}월 작업"
-        for p in persons[:600]:
-            b = Row(text=f"{p.name}   {p.emp_no}   {p.team}", size_hint_y=None, height=dp(44),
-                    halign="left", background_normal="", background_color=(.96, .97, .99, 1),
+        self.app._order = list(persons[:600])
+        for p in self.app._order:
+            b = Row(text=f"  {p.name}    {p.emp_no}    {p.team}", size_hint_y=None, height=dp(52),
+                    halign="left", valign="middle", font_size=dp(16),
+                    background_normal="", background_color=(.96, .97, .99, 1),
                     color=(.1, .1, .1, 1))
             b.bind(size=lambda i, s: setattr(i, "text_size", (i.width - dp(20), None)))
             b.bind(on_release=lambda inst, pr=p: self.app.open_person(pr))
@@ -183,23 +193,37 @@ class PersonScreen(Screen):
         self.app = app
         self.person = None
         root = BoxLayout(orientation="vertical")
-        bar = BoxLayout(size_hint_y=None, height=dp(52), padding=dp(6), spacing=dp(6))
-        bar.add_widget(_btn("← 목록", size_hint_x=None, width=dp(90),
+        bar = BoxLayout(size_hint_y=None, height=dp(52), padding=dp(5), spacing=dp(5))
+        bar.add_widget(_btn("목록", size_hint_x=None, width=dp(66),
                             on_release=lambda *a: setattr(self.app.sm, "current", "home")))
-        self.title = Label(text="", bold=True)
+        self.title = Label(text="", bold=True, font_size=dp(17), shorten=True,
+                           halign="center", valign="middle")
+        self.title.bind(size=self.title.setter("text_size"))
         bar.add_widget(self.title)
+        bar.add_widget(_btn("◀", size_hint_x=None, width=dp(52), font_size=dp(20),
+                            on_release=lambda *a: self.app.person_nav(-1)))
+        bar.add_widget(_btn("▶", size_hint_x=None, width=dp(52), font_size=dp(20),
+                            on_release=lambda *a: self.app.person_nav(1)))
         root.add_widget(bar)
-        sc = ScrollView()
-        self.lst = GridLayout(cols=1, size_hint_y=None, spacing=dp(1), padding=dp(4))
+        # 요일 머리글
+        head = BoxLayout(size_hint_y=None, height=dp(26), padding=[dp(6), 0], spacing=dp(6))
+        h1 = Label(text="날짜", size_hint_x=None, width=dp(72), font_size=dp(12), color=(.5, .5, .5, 1))
+        head.add_widget(h1)
+        head.add_widget(Label(text="근무 (탭하여 수정 · 노랑=수기)", font_size=dp(12),
+                              color=(.5, .5, .5, 1), halign="left", valign="middle"))
+        root.add_widget(head)
+        self.scroll = make_scroll()
+        self.lst = GridLayout(cols=1, size_hint_y=None, spacing=dp(3), padding=[dp(4), dp(2)])
         self.lst.bind(minimum_height=self.lst.setter("height"))
-        sc.add_widget(self.lst)
-        root.add_widget(sc)
+        self.scroll.add_widget(self.lst)
+        root.add_widget(self.scroll)
         self.add_widget(root)
 
     def load(self, person):
         self.person = person
-        self.title.text = f"{person.name} ({person.team})"
+        self.title.text = f"{person.name} · {person.team}"
         self.refresh()
+        self.scroll.scroll_y = 1  # 새 승무원은 맨 위부터
 
     def refresh(self):
         self.lst.clear_widgets()
@@ -212,12 +236,15 @@ class PersonScreen(Screen):
             v = core.effective_value(wb, p.row, gc)
             manual = wb.grid.is_manual.get((p.row, gc), False)
             hol = core.is_holiday(d, wb.holidays)
-            row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(4))
-            dl = Label(text=f"{d.month}/{d.day} {WD[d.weekday()]}", size_hint_x=None, width=dp(90),
-                       color=(.75, .15, .15, 1) if hol else (.2, .2, .2, 1))
+            row = BoxLayout(size_hint_y=None, height=dp(54), spacing=dp(6), padding=[dp(2), 0])
+            dl = Label(text=f"{d.month}/{d.day}\n{WD[d.weekday()]}", size_hint_x=None, width=dp(72),
+                       halign="center", valign="middle", font_size=dp(14),
+                       color=(.78, .12, .12, 1) if hol else (.25, .25, .25, 1))
+            dl.bind(size=dl.setter("text_size"))
             row.add_widget(dl)
-            cell = _btn(v or "-", background_normal="",
-                        background_color=(1, .95, .8, 1) if manual else (.93, .96, 1, 1),
+            cell = _btn(v or "-", font_size=dp(19), halign="center", valign="middle",
+                        background_normal="",
+                        background_color=(1, .9, .62, 1) if manual else (.92, .95, 1, 1),
                         color=(.1, .1, .1, 1))
             cell.bind(on_release=lambda inst, g=gc, dd=d: self.app.edit_cell(p, g, dd))
             row.add_widget(cell)
@@ -394,7 +421,7 @@ class RosterApp(App):
         top.add_widget(pl)
         box.add_widget(top)
 
-        sc = ScrollView()
+        sc = make_scroll()
         lst = GridLayout(cols=1, size_hint_y=None, spacing=dp(2))
         lst.bind(minimum_height=lst.setter("height"))
         try:
@@ -454,31 +481,68 @@ class RosterApp(App):
         self.person_scr.load(p)
         self.sm.current = "person"
 
+    def person_nav(self, delta):
+        """목록 순서대로 이전/다음 승무원으로 이동."""
+        order = getattr(self, "_order", [])
+        cur = self.person_scr.person
+        try:
+            i = order.index(cur)
+        except ValueError:
+            return
+        j = i + delta
+        if 0 <= j < len(order):
+            self.person_scr.load(order[j])
+
     def edit_cell(self, p, gc, d):
         wb = self.wb
         cur = core.effective_value(wb, p.row, gc)
-        box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(10))
-        box.add_widget(Label(text=f"{p.name} · {d.month}/{d.day}", bold=True,
-                             size_hint_y=None, height=dp(30)))
-        ti = TextInput(text="" if not wb.grid.is_manual.get((p.row, gc)) else cur,
-                       hint_text="다이아번호 / S / 교육 등", multiline=False,
-                       size_hint_y=None, height=dp(44))
-        box.add_widget(ti)
-        pop = Popup(title="근무 수정", content=box, size_hint=(.9, None), height=dp(260))
+        manual = wb.grid.is_manual.get((p.row, gc), False)
+        wd = WD[d.weekday()]
+        box = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(10))
+        box.add_widget(Label(text=f"{p.name}  ·  {d.month}/{d.day} ({wd})", bold=True,
+                             size_hint_y=None, height=dp(34), font_size=dp(18)))
+        box.add_widget(Label(text=f"현재 {'수기수정' if manual else '계획값'}: [{cur or '-'}]",
+                             size_hint_y=None, height=dp(22), font_size=dp(13),
+                             color=(.45, .45, .45, 1)))
+        disp = TextInput(text=cur if manual else "", multiline=False,
+                         size_hint_y=None, height=dp(58), font_size=dp(26),
+                         halign="center", padding=[dp(8), dp(12), dp(8), dp(8)])
+        box.add_widget(disp)
+        pop = Popup(title="근무 수정", content=box, size_hint=(.95, .92))
 
         def do_save(val):
-            core.save_cell(wb, p.row, gc, val)
+            core.save_cell(wb, p.row, gc, (val or "").strip())
             pop.dismiss()
             self.person_scr.refresh()
-            self._toast("저장됨")
-        br = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(6))
-        br.add_widget(_btn("저장", on_release=lambda *a: do_save(ti.text)))
-        br.add_widget(_btn("S", on_release=lambda *a: do_save("S")))
-        br.add_widget(_btn("계획복원", on_release=lambda *a: do_save("")))
-        box.add_widget(br)
-        br2 = BoxLayout(size_hint_y=None, height=dp(44))
-        br2.add_widget(_btn("닫기", on_release=lambda *a: pop.dismiss()))
-        box.add_widget(br2)
+
+        def ins(c):
+            disp.text = (disp.text or "") + c
+
+        # 숫자 키패드(다이아번호 빠른 입력)
+        pad = GridLayout(cols=3, size_hint_y=None, height=dp(216), spacing=dp(5))
+        for c in ["7", "8", "9", "4", "5", "6", "1", "2", "3"]:
+            pad.add_widget(_btn(c, font_size=dp(24), on_release=lambda i, ch=c: ins(ch)))
+        pad.add_widget(_btn("0", font_size=dp(24), on_release=lambda i: ins("0")))
+        pad.add_widget(_btn("지움", font_size=dp(17),
+                            on_release=lambda i: setattr(disp, "text", (disp.text or "")[:-1])))
+        pad.add_widget(_btn("전체삭제", font_size=dp(15),
+                            on_release=lambda i: setattr(disp, "text", "")))
+        box.add_widget(pad)
+
+        # 자주 쓰는 값 바로저장
+        q = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(5))
+        for label, val in [("S", "S"), ("교육", "교육"), ("계획복원", "")]:
+            q.add_widget(_btn(label, font_size=dp(16),
+                              on_release=lambda i, v=val: do_save(v)))
+        box.add_widget(q)
+
+        act = BoxLayout(size_hint_y=None, height=dp(56), spacing=dp(6))
+        act.add_widget(_btn("저장", font_size=dp(19), background_normal="",
+                            background_color=(.13, .5, .85, 1), color=(1, 1, 1, 1),
+                            on_release=lambda i: do_save(disp.text)))
+        act.add_widget(_btn("닫기", size_hint_x=None, width=dp(100),
+                            on_release=lambda i: pop.dismiss()))
+        box.add_widget(act)
         pop.open()
 
     def _toast(self, msg):
